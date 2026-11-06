@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="17132" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" launchScreen="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="01J-lp-oVM">
+    <device id="retina4_7" orientation="portrait" appearance="light"/>
+    <dependencies>
+        <deployment identifier="iOS"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="17105"/>
+        <capability name="System colors in document resources" minToolsVersion="11.0"/>
+        <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
+    </dependencies>
+    <scenes>
+        <!--View Controller-->
+        <scene sceneID="EHf-IW-A2E">
+            <objects>
+                <viewController id="01J-lp-oVM" sceneMemberID="viewController">
+                    <view key="view" contentMode="scaleToFill" id="snD-IY-ifK">
+                        <rect key="frame" x="0.0" y="0.0" width="375" height="667"/>
+                        <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                        <subviews>
+                            <imageView userInteractionEnabled="NO" contentMode="scaleAspectFit" image="StartupLockup" translatesAutoresizingMaskIntoConstraints="NO" id="launch-lockup">
+                                <rect key="frame" x="52.5" y="169.0" width="270" height="391"/>
+                                <constraints>
+                                    <constraint firstAttribute="width" secondItem="launch-lockup" secondAttribute="height" multiplier="270:391" id="lockup-aspect"/>
+                                    <constraint firstAttribute="width" constant="270" priority="750" id="lockup-ideal-width"/>
+                                </constraints>
+                            </imageView>
+                        </subviews>
+                        <color key="backgroundColor" red="1" green="1" blue="1" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                        <constraints>
+                            <constraint firstItem="launch-lockup" firstAttribute="centerX" secondItem="snD-IY-ifK" secondAttribute="centerX" id="lockup-center-x"/>
+                            <constraint firstItem="launch-lockup" firstAttribute="centerY" secondItem="snD-IY-ifK" secondAttribute="centerY" multiplier="1.0926773455" id="lockup-center-y"/>
+                            <constraint firstItem="launch-lockup" firstAttribute="width" relation="lessThanOrEqual" secondItem="snD-IY-ifK" secondAttribute="width" multiplier="270:402" id="lockup-screen-width"/>
+                            <constraint firstItem="launch-lockup" firstAttribute="height" relation="lessThanOrEqual" secondItem="snD-IY-ifK" secondAttribute="height" multiplier="391:874" id="lockup-screen-height"/>
+                        </constraints>
+                    </view>
+                </viewController>
+                <placeholder placeholderIdentifier="IBFirstResponder" id="iYj-Kq-Ea1" userLabel="First Responder" sceneMemberID="firstResponder"/>
+            </objects>
+            <point key="canvasLocation" x="53" y="375"/>
+        </scene>
+    </scenes>
+    <resources>
+        <image name="StartupLockup" width="270" height="391"/>
+    </resources>
+</document>

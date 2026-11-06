@@ -1,0 +1,247 @@
+import XCTest
+
+/// Real user actions in isolated repository fixtures. These tests do not use
+/// visual-baseline state, change device layout, or access production data.
+final class CourseFunctionalUITests: XCTestCase {
+  override func setUpWithError() throws {
+    continueAfterFailure = false
+    XCUIDevice.shared.orientation = .portrait
+  }
+
+  private func launch(_ route: String) -> XCUIApplication {
+    let app = XCUIApplication()
+    app.launchArguments = ["--fixture", "--fixture-session", UUID().uuidString, "--route", route]
+    app.launch()
+    XCTAssertTrue(app.wait(for: .runningForeground, timeout: 20))
+    return app
+  }
+
+  private func tap(_ element: XCUIElement, in app: XCUIApplication) {
+    XCTAssertTrue(element.waitForExistence(timeout: 15), "Missing \(element)")
+    // Exercise the form's explicit keyboard exit rather than dragging from
+    // coordinates which can belong to the software keyboard on an iPhone.
+    let keyboardDone = app.buttons["chapter.keyboardDone"]
+    if app.keyboards.firstMatch.exists, keyboardDone.exists {
+      keyboardDone.tap()
+      XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+    }
+    for _ in 0..<8 {
+      if element.isHittable { break }
+      let surface = app.scrollViews.allElementsBoundByIndex.last ?? app
+      surface.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.70)).press(
+        forDuration: 0.05,
+        thenDragTo: surface.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.25)))
+    }
+    XCTAssertTrue(element.isHittable, "Unreachable \(element)")
+    element.tap()
+  }
+
+  private func replace(_ field: XCUIElement, with value: String) {
+    XCTAssertTrue(field.waitForExistence(timeout: 10))
+    // A center tap can place the insertion point in the middle of a Chinese
+    // title. Tap its trailing edge before backspacing the complete value.
+    field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
+    let current = field.value as? String ?? ""
+    field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count) + value)
+    XCTAssertEqual(field.value as? String, value)
+  }
+
+  private func finishQuestionnaire(_ app: XCUIApplication) {
+    let choices = ["很紧急，短期要学完", "碎片化零散时间", "应试备考", "重点和考点", "AI 视频讲解", "自由复习"]
+    let questions = [
+      "你当前学习的紧迫程度？", "你的学习时间是哪种类型？", "这门课程主要用于什么？", "你希望内容更侧重什么？", "你最需要哪些学习辅助？", "你习惯怎样巩固这门课程？",
+    ]
+    for (index, choice) in choices.enumerated() {
+      XCTAssertTrue(app.staticTexts[questions[index]].firstMatch.waitForExistence(timeout: 10))
+      tap(
+        app.buttons.containing(NSPredicate(format: "label CONTAINS %@", choice)).firstMatch, in: app
+      )
+      if index >= 2 { tap(app.buttons["courseSetup.next"], in: app) }
+    }
+  }
+
+  func testOnboardingAutoAdvancesWithSingleChoicesAndBackNavigation() {
+    let app = launch("onboarding")
+    tap(app.buttons["onboarding.next"], in: app)
+    XCTAssertFalse(app.buttons["onboarding.next"].exists)
+    let goals = XCTAttachment(screenshot: app.screenshot())
+    goals.name = "Figma onboarding four-card goals"
+    goals.lifetime = .keepAlways
+    add(goals)
+    tap(app.buttons["onboarding.choice.1.exam"], in: app)
+    XCTAssertTrue(app.buttons["onboarding.time.under30"].waitForExistence(timeout: 5))
+    let times = XCTAttachment(screenshot: app.screenshot())
+    times.name = "Four colored clocks for daily learning time"
+    times.lifetime = .keepAlways
+    add(times)
+    tap(app.buttons["onboarding.time.under30"], in: app)
+    XCTAssertTrue(app.buttons["onboarding.choice.3.understanding"].waitForExistence(timeout: 5))
+    tap(app.buttons["上一步"], in: app)
+    XCTAssertTrue(app.buttons["onboarding.time.under30"].isSelected)
+    tap(app.buttons["onboarding.time.30to60"], in: app)
+    tap(app.buttons["onboarding.choice.3.understanding"], in: app)
+    XCTAssertTrue(app.buttons["onboarding.choice.4.examples"].waitForExistence(timeout: 5))
+    tap(app.buttons["上一步"], in: app)
+    XCTAssertTrue(app.buttons["onboarding.choice.3.understanding"].isSelected)
+    tap(app.buttons["onboarding.choice.3.memory"], in: app)
+    tap(app.buttons["onboarding.choice.4.examples"], in: app)
+    XCTAssertTrue(app.buttons["onboarding.choice.5.collaborative"].waitForExistence(timeout: 5))
+    tap(app.buttons["上一步"], in: app)
+    XCTAssertTrue(app.buttons["onboarding.choice.4.examples"].isSelected)
+    tap(app.buttons["onboarding.choice.4.principles"], in: app)
+    tap(app.buttons["onboarding.choice.5.collaborative"], in: app)
+    XCTAssertTrue(app.buttons["tab-profile"].waitForExistence(timeout: 10))
+    tap(app.buttons["tab-profile"], in: app)
+    tap(app.buttons["profile.settings"], in: app)
+    XCTAssertTrue(app.staticTexts["更牢固记忆"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.staticTexts["讲透原理"].exists)
+    XCTAssertFalse(app.staticTexts["更深入理解、更牢固记忆"].exists)
+  }
+
+  func testOnboardingCanSkipEveryOptionalQuestion() {
+    let app = launch("onboarding")
+    tap(app.buttons["onboarding.next"], in: app)
+    for _ in 1...5 { tap(app.buttons["onboarding.skip"], in: app) }
+    XCTAssertTrue(app.staticTexts["Hi，小明同学"].firstMatch.waitForExistence(timeout: 10))
+    tap(app.buttons["tab-profile"], in: app)
+    tap(app.buttons["profile.settings"], in: app)
+    XCTAssertTrue(app.staticTexts["暂未设置"].firstMatch.waitForExistence(timeout: 10))
+  }
+
+  func testCoursePreferencesAutoAdvanceBackMultiSelectAndFinalConfirmation() {
+    let app = launch("courseSetup")
+    func option(_ question: String, _ value: String) -> XCUIElement {
+      app.buttons["courseSetup.option.\(question).\(value)"]
+    }
+    tap(option("urgency", "urgent"), in: app)
+    XCTAssertTrue(option("timePattern", "fragmented").waitForExistence(timeout: 5))
+    tap(app.buttons["上一步"], in: app)
+    XCTAssertTrue(option("urgency", "urgent").isSelected)
+    let attachment = XCTAttachment(screenshot: app.screenshot())
+    attachment.name = "course-preferences-profile-style"
+    attachment.lifetime = .keepAlways
+    add(attachment)
+    tap(option("urgency", "steady"), in: app)
+    tap(option("timePattern", "fragmented"), in: app)
+    tap(option("goals", "systematic"), in: app) // Clear the fixture's existing selection.
+    XCTAssertFalse(app.buttons["courseSetup.next"].isEnabled)
+    tap(option("goals", "exam"), in: app)
+    tap(option("goals", "interest"), in: app)
+    XCTAssertTrue(option("goals", "exam").isSelected)
+    XCTAssertTrue(option("goals", "interest").isSelected)
+    tap(app.buttons["courseSetup.next"], in: app)
+    tap(app.buttons["上一步"], in: app)
+    XCTAssertTrue(option("goals", "exam").isSelected)
+    XCTAssertTrue(option("goals", "interest").isSelected)
+    tap(app.buttons["courseSetup.next"], in: app)
+    tap(option("contentFoci", "keyPoints"), in: app)
+    tap(app.buttons["courseSetup.next"], in: app)
+    tap(option("aids", "guidedNotes"), in: app)
+    tap(app.buttons["courseSetup.next"], in: app)
+    tap(option("reviews", "free"), in: app)
+    XCTAssertFalse(option("reviews", "periodic").isSelected)
+    XCTAssertTrue(option("reviews", "free").isSelected)
+    XCTAssertTrue(app.buttons["courseSetup.next"].exists)
+    XCTAssertFalse(app.buttons["chapters.confirm"].exists)
+    tap(app.buttons["courseSetup.next"], in: app)
+    XCTAssertTrue(app.buttons["chapters.confirm"].waitForExistence(timeout: 15))
+  }
+
+  func testQuestionnaireChapterCancelSaveRemoveCancelAndConfirm() {
+    let app = launch("courseSetup")
+    finishQuestionnaire(app)
+    XCTAssertTrue(app.staticTexts["确认目录"].firstMatch.waitForExistence(timeout: 10))
+    XCTAssertTrue(app.staticTexts["原文页码待补充"].firstMatch.exists)
+    let edit = app.buttons["chapter.edit.c2"]
+    tap(edit, in: app)
+    let title = app.textFields["课程章节名称"]
+    XCTAssertTrue(title.waitForExistence(timeout: 10))
+    let original = title.value as? String ?? ""
+    replace(title, with: "Cancelled chapter draft")
+    tap(app.buttons["关闭"].firstMatch, in: app)
+    tap(edit, in: app)
+    XCTAssertEqual(title.value as? String, original, "Closing an unsaved editor must discard edits")
+    replace(title, with: "Saved chapter draft")
+    tap(app.buttons["chapter.save"], in: app)
+    tap(edit, in: app)
+    XCTAssertEqual(title.value as? String, "Saved chapter draft")
+    tap(app.buttons["移除此章节"], in: app)
+    tap(app.buttons["取消"].firstMatch, in: app)
+    XCTAssertTrue(title.exists, "Cancelling removal must retain the chapter editor")
+    tap(app.buttons["关闭"].firstMatch, in: app)
+    tap(app.buttons["chapters.confirm"], in: app)
+    XCTAssertTrue(app.staticTexts["生成成功"].firstMatch.waitForExistence(timeout: 10))
+    tap(app.buttons["进入学习"], in: app)
+    XCTAssertTrue(app.staticTexts["学习计划"].firstMatch.waitForExistence(timeout: 10))
+  }
+
+
+  func testCourseDeletionCanCancelThenPersistWithoutAffectingAnotherCourse() {
+    let session = UUID().uuidString
+    let app = XCUIApplication()
+    app.launchArguments = ["--fixture", "--fixture-session", session,
+      "--fixture-reduce-motion", "--route", "study", "--book", "book_biology_2",
+      "--chapter", "c1s1"]
+    let removedCourse = "course:catalog_high_school_math_required_2"
+    let retainedCourse = "course:book_biology_2"
+    let removedRow = app.buttons["study.course.\(removedCourse)"]
+    let retainedRow = app.buttons["study.course.\(retainedCourse)"]
+    let delete = app.buttons["course.delete.\(removedCourse)"]
+
+    func openSwitcher() {
+      if !retainedRow.waitForExistence(timeout: 2) {
+        tap(app.buttons["study.course.switch"], in: app)
+      }
+      XCTAssertTrue(retainedRow.waitForExistence(timeout: 10))
+    }
+
+    app.launch()
+    openSwitcher()
+    XCTAssertTrue(removedRow.exists)
+    tap(delete, in: app)
+    let confirmation = app.sheets["从本机删除《数学 必修 第二册》？"]
+    XCTAssertTrue(confirmation.waitForExistence(timeout: 5))
+    if confirmation.buttons["取消"].exists {
+      tap(confirmation.buttons["取消"], in: app)
+    } else {
+      // Compact popovers expose a native dismissal region instead of a cancel row.
+      let dismiss = app.otherElements["PopoverDismissRegion"]
+      XCTAssertTrue(dismiss.waitForExistence(timeout: 5))
+      dismiss.tap()
+    }
+    XCTAssertTrue(confirmation.waitForNonExistence(timeout: 5))
+    XCTAssertTrue(removedRow.exists, "Cancelling must keep the course in the list")
+    XCTAssertTrue(delete.exists)
+
+    tap(delete, in: app)
+    XCTAssertTrue(confirmation.waitForExistence(timeout: 5))
+    tap(confirmation.buttons["从本机删除课程"], in: app)
+    XCTAssertTrue(delete.waitForNonExistence(timeout: 10))
+    XCTAssertFalse(app.alerts["删除课程未完成"].exists)
+    openSwitcher()
+    XCTAssertFalse(removedRow.exists)
+    XCTAssertTrue(retainedRow.exists)
+
+    app.terminate()
+    app.launch()
+    openSwitcher()
+    XCTAssertFalse(removedRow.exists, "The deleted course must stay deleted after relaunch")
+    XCTAssertFalse(delete.exists)
+    tap(retainedRow, in: app)
+    let chapter = app.buttons["study.chapter.c1"]
+    XCTAssertTrue(chapter.waitForExistence(timeout: 10),
+      "Another course must still open its own chapter directory")
+    tap(chapter, in: app)
+    XCTAssertTrue(chapter.exists)
+  }
+
+  func testCommunityImportCompletesQuestionnaireAndOpensStudy() {
+    let app = launch("communityBook")
+    tap(app.buttons["community.import"], in: app)
+    finishQuestionnaire(app)
+    XCTAssertTrue(app.staticTexts["导入成功"].firstMatch.waitForExistence(timeout: 10))
+    tap(app.buttons["进入学习"], in: app)
+    XCTAssertTrue(app.staticTexts["学习计划"].firstMatch.waitForExistence(timeout: 10))
+    XCTAssertTrue(app.buttons["添加资料"].firstMatch.exists)
+  }
+}

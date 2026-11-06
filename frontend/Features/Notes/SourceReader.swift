@@ -1,0 +1,1372 @@
+import PDFKit
+import PhotosUI
+import PencilKit
+import SwiftUI
+import UIKit
+
+enum NotesDrawingCoordinates {
+  static let width: CGFloat = 1000
+  static func normalized(_ drawing: PKDrawing, displayWidth: CGFloat) -> PKDrawing {
+    guard displayWidth > 0 else { return drawing }
+    return drawing.transformed(
+      using: CGAffineTransform(scaleX: width / displayWidth, y: width / displayWidth))
+  }
+  static func displayed(_ drawing: PKDrawing, displayWidth: CGFloat) -> PKDrawing {
+    return drawing.transformed(
+      using: CGAffineTransform(scaleX: displayWidth / width, y: displayWidth / width))
+  }
+}
+
+/// Original-page position is separate for every course and resource. A fresh citation
+/// deliberately overrides the last browsing position; an ordinary reader open restores it.
+enum NotesReadingPosition {
+  static func key(courseID: String?, bookID: String) -> String { "\(courseID ?? "")::\(bookID)" }
+  static func initialPage(
+    courseID: String?, bookID: String, target: SourcePageTarget?,
+    locations: [String: StudyLocation], pageCount: Int
+  ) -> Int {
+    let explicit = target.flatMap { $0.bookID == bookID ? $0.page : nil }
+    return min(
+      max(1, pageCount),
+      max(1, explicit ?? locations[key(courseID: courseID, bookID: bookID)]?.page ?? 1))
+  }
+  @MainActor static func save(_ page: Int, courseID: String?, bookID: String, store: AppStore) {
+    guard !bookID.isEmpty else { return }
+    let locationKey = key(courseID: courseID, bookID: bookID)
+    var location = store.locations[locationKey] ?? StudyLocation()
+    if store.selectedCourseID == courseID && store.selectedBookID == bookID {
+      location.chapterID = store.selectedChapterID
+      location.lessonID = store.selectedLessonID
+    }
+    location.page = max(1, page)
+    store.locations[locationKey] = location
+    store.persist()
+  }
+}
+
+private enum NotesReaderMode { case read, ink, text, ai }
+private enum NotesPen { case pen, marker, eraser }
+struct NotesPageManifest: Decodable {
+  struct Asset: Decodable {
+    let book_id: String
+    let pdf_page: Int
+    let url: String
+  }
+  let assets: [Asset]
+  static let assets: [Asset] = {
+    guard let data = try? ContentBundle.data("Data/published-pages.json"),
+      let value = try? JSONDecoder().decode(Self.self, from: data)
+    else { return [] }
+    return value.assets
+  }()
+}
+
+struct NotesSourceReaderView: View {
+  @Environment(AppStore.self) private var store
+  @Environment(\.bookCourseReduceMotion) private var reduceMotion
+  @State private var page = 1
+  @State private var pageInput = "1"
+  @State private var mode: NotesReaderMode = .read
+  @State private var pen: NotesPen = .pen
+  @State private var color = UIColor(red: 124 / 255, green: 58 / 255, blue: 237 / 255, alpha: 1)
+  @State private var width: CGFloat = 3
+  @State private var colorHex: UInt = 0x7c3aed
+  @State private var finger = false
+  @State private var drawingData = Data()
+  @State private var inkNote: StudyNote?
+  @State private var inkDirty = false
+  @State private var saveTask: Task<Void, Never>?
+  @State private var saving = false
+  @State private var error: String?
+  @State private var showNotes = false
+  @State private var showClear = false
+  @State private var editor: StudyNote?
+  @State private var editorCloseRequest = 0
+  @State private var region: CGRect?
+  @State private var regionPreview: UIImage?
+  @State private var showRegion = false
+  @State private var regionNote: StudyNote?
+  @State private var regionSession = UUID()
+  @State private var selectedText = ""
+  @State private var canvas = NotesCanvasController()
+  @State private var zoom: CGFloat = 1
+  @State private var magnifyBase: CGFloat = 1
+  @State private var pageForward = true
+  @State private var ready = false
+  @State private var availableWidth: CGFloat = 0
+  @State private var availableHeight: CGFloat = 0
+  @State private var showPageControls = false
+  @State private var showInkReview = false
+  @State private var recognizedText = ""
+  @State private var organizedText = ""
+  @State private var inkPhase = "idle"
+  @State private var inkTask: Task<Void, Never>?
+  @State private var inkServiceError: String?
+  @State private var inkRemoteNote: StudioNote?
+  @State private var inkResultJob: StudioJob?
+  @State private var reviewedDrawing = Data()
+  @State private var organizedAccepted = true
+  @State private var loadGeneration = UUID()
+  @State private var capturedTarget: SourcePageTarget?
+  @State private var capturedCourseID: String?
+  @State private var capturedBookID: String?
+  @State private var lastSavedDrawing = Data()
+  @State private var cachedPDF: PDFDocument?
+  @State private var cachedPageImage: UIImage?
+  @State private var cachedMediaBookID = ""
+  private var bookID: String {
+    capturedBookID ?? capturedTarget?.bookID ?? store.selectedBookID ?? ""
+  }
+  private var source: SourceContent? { store.sources.first { $0.id == bookID } }
+  private var maxPage: Int { max(1, source?.summary.page_count ?? capturedTarget?.pageEnd ?? 1) }
+  private var chapter: Chapter? {
+    let matching = source?.chapters.filter { $0.page_start <= page && $0.page_end >= page } ?? []
+    let sections = matching.filter { $0.level <= 2 }
+    return (sections.isEmpty ? matching : sections).sorted { lhs, rhs in
+      lhs.level == rhs.level
+        ? lhs.page_end - lhs.page_start < rhs.page_end - rhs.page_start : lhs.level > rhs.level
+    }.first
+  }
+  private var heading: String {
+    chapter?.source_title ?? capturedTarget?.title ?? source?.summary.title ?? "教材原文"
+  }
+  private var selectionPrintedPage: Int? {
+    chapter?.printed_page_start.map { $0 + page - (chapter?.page_start ?? page) }
+  }
+  private var imagePath: String? {
+    NotesPageManifest.assets.first { $0.book_id == bookID && $0.pdf_page == page }?.url
+  }
+  private var fileURL: URL? { store.sourceFileURL(bookID) }
+  private var pdf: PDFDocument? { cachedPDF }
+  private var pageImage: UIImage? { cachedPageImage }
+  private func refreshMedia() {
+    if cachedMediaBookID != bookID {
+      cachedMediaBookID = bookID
+      cachedPDF = fileURL.flatMap {
+        $0.pathExtension.lowercased() == "pdf" ? PDFDocument(url: $0) : nil
+      }
+    }
+    if let path = imagePath, let image = ContentBundle.image(path) {
+      cachedPageImage = image
+    } else if let pdfPage = cachedPDF?.page(at: page - 1) {
+      cachedPageImage = pdfPage.thumbnail(of: CGSize(width: 1200, height: 1700), for: .mediaBox)
+    } else if let fileURL {
+      cachedPageImage = UIImage(contentsOfFile: fileURL.path)
+    } else {
+      cachedPageImage = nil
+    }
+  }
+  private var pageText: String {
+    let chunks =
+      source?.chunks.filter { $0.page_start <= page && $0.page_end >= page }.map(\.text).joined(
+        separator: "\n\n") ?? ""
+    if !chunks.isEmpty { return chunks }
+    if let text = pdf?.page(at: page - 1)?.string, !text.isEmpty { return text }
+    return page == capturedTarget?.page ? capturedTarget?.sourceText ?? "" : ""
+  }
+  private var pageNotes: [StudyNote] {
+    guard let resourceID = store.courseResourceID(courseID: capturedCourseID, bookID: bookID) else { return [] }
+    return store.notes.filter { $0.anchor?.courseResourceID == resourceID && $0.anchor?.page == page }
+  }
+  var body: some View {
+    VStack(spacing: 0) {
+      header
+      tools
+      if let error {
+        HStack {
+          Text(error).font(DS.font(.supporting)).foregroundStyle(DS.danger)
+          Spacer()
+          Button("重试保存") { Task { _ = await flushInk() } }.buttonFrame()
+        }
+        .padding(12).background(Color(hex: 0xfff0f3))
+      }
+      GeometryReader { bounds in
+        ScrollView([.vertical, .horizontal]) {
+          pageContent.id("\(bookID):\(page)")
+            .transition(
+              .asymmetric(
+                insertion: .offset(x: pageForward ? 24 : -24).combined(with: .opacity),
+                removal: .opacity)
+            )
+            .frame(minWidth: bounds.size.width, minHeight: bounds.size.height, alignment: .center)
+        }.background(store.isPad ? DS.background : .white)
+          .onAppear {
+            availableWidth = bounds.size.width
+            availableHeight = bounds.size.height
+          }
+          .onChange(of: bounds.size) { _, size in
+            availableWidth = size.width
+            availableHeight = size.height
+          }
+          .overlay(alignment: .topTrailing) {
+            if showNotes && !pageNotes.isEmpty {
+              ScrollView { pageNotesList }.frame(maxWidth: 320, maxHeight: 420).padding(8).shadow(
+                color: DS.text.opacity(0.15), radius: 12, y: 8)
+            }
+          }
+          .overlay(alignment: .bottom) {
+            if showInkReview && mode == .ink {
+              ScrollView { inkReview }.frame(maxWidth: 380, maxHeight: 440).padding(8)
+            } else if mode == .ink {
+              BCButton("识别笔迹", icon: "Sparkles", style: .secondary) {
+                recognizeInk()
+              }.frame(maxWidth: 220).padding(12)
+            } else if mode == .ai {
+              Text("拖动框选原文，松手后向 AI 提问").font(DS.font(.supporting)).foregroundStyle(DS.primary).padding(10)
+                .background(.white, in: Capsule()).padding(10).allowsHitTesting(false)
+            } else if mode == .text {
+              Text("点击原文任意位置，添加文字或语音批注").font(DS.font(.supporting)).foregroundStyle(DS.primary).padding(10)
+                .background(.white, in: Capsule()).padding(10).allowsHitTesting(false)
+            }
+          }
+          .overlay(alignment: .bottom) {
+            if mode == .read, pdf != nil,
+              !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+              BCButton("整理成笔记", icon: "Sparkles") {
+                guard capturedCourseID != nil else {
+                  error = "无指定课程，无法进行笔记撰写"; return
+                }
+                store.startSelectionNote(
+                  AgentSelection(
+                    bookID: bookID, courseID: capturedCourseID, chapterID: chapter?.chapter_id,
+                    page: page, printedPage: selectionPrintedPage, text: selectedText),
+                  request: "请整理并解释这段教材原文，保存为笔记后打开。")
+              }.frame(maxWidth: 220).padding(12)
+                .accessibilityIdentifier("reader.selection.note")
+            }
+          }
+      }
+    }.background(.white).ignoresSafeArea(edges: .bottom)
+      .blur(radius: showRegion ? 4 : 0)
+      .allowsHitTesting(!showRegion)
+      .accessibilityHidden(showRegion)
+      .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: showRegion)
+      .task { await initialize() }
+      .onChange(of: selectedText) { _, value in store.selectedQuote = value }
+      .onChange(of: drawingData) { _, _ in
+        guard ready, drawingData != lastSavedDrawing else { return }
+        if showInkReview, drawingData != reviewedDrawing {
+          inkTask?.cancel()
+          showInkReview = false
+          inkServiceError = nil
+          inkRemoteNote = nil
+          inkResultJob = nil
+          inkPhase = "idle"
+        }
+        inkDirty = true
+        saveTask?.cancel()
+        saveTask = Task {
+          try? await Task.sleep(for: .milliseconds(500))
+          guard !Task.isCancelled else { return }
+          _ = await flushInk()
+        }
+      }
+      .onDisappear {
+        saveTask?.cancel()
+        inkTask?.cancel()
+        if inkDirty { Task { _ = await flushInk() } }
+      }
+      .onChange(of: store.sourceTarget) { _, value in
+        guard value != capturedTarget else { return }
+        Task {
+          guard await flushInk() else { return }
+          capturedTarget = value
+          capturedCourseID = capturedTarget?.courseID
+          capturedBookID = value?.bookID ?? store.selectedBookID
+          page = NotesReadingPosition.initialPage(
+            courseID: capturedCourseID, bookID: bookID, target: value, locations: store.locations,
+            pageCount: maxPage)
+          pageInput = "\(page)"
+          NotesReadingPosition.save(page, courseID: capturedCourseID, bookID: bookID, store: store)
+          ready = false
+          closeRegion()
+          editor = nil
+          selectedText = ""
+          zoom = 1
+          magnifyBase = 1
+          showInkReview = false
+          refreshMedia()
+          await loadInk()
+        }
+      }
+      .overlay {
+        if let note = editor, !showRegion {
+          NotesPopup(
+            width: 340, height: note.kind == .voice ? 650 : 390, anchor: note.position,
+            topInset: 100, glass: true, identifier: "reader.annotationDialog",
+            onOutside: { editorCloseRequest += 1 }
+          ) {
+            if note.kind == .voice {
+              NotesVoiceNoteView(
+                existingNote: note, embedded: true, closeRequest: editorCloseRequest,
+                onClose: { editor = nil })
+            } else {
+              NotesTextEditor(
+                note: note, onSaved: { editor = nil }, compact: true,
+                closeRequest: editorCloseRequest, onClose: { editor = nil },
+                onAskAI: { savedNote in
+                  editor = savedNote
+                  regionNote = savedNote
+                  regionSession = UUID()
+                  showRegion = true
+                })
+            }
+          }.id(note.id)
+        }
+      }
+      .overlay {
+        BottomPanelLayer(presentationID: showRegion ? "reader-ai" : nil, dimOpacity: 0.06,
+          presentationAnimation: .easeInOut(duration: 0.22), onDismiss: closeRegion) {
+          if showRegion {
+            NotesRegionAIView(bookID: bookID, chapterID: chapter?.id, page: page,
+              pageText: pageText, referenceImage: regionPreview,
+              note: regionNote, onClose: closeRegion).id(regionSession)
+              .accessibilityIdentifier("reader.regionDialog")
+              .opacity(store.assistantState.screenshotExcludesAssistant ? 0 : 1)
+          }
+        }
+      }
+      .overlay {
+        if showClear {
+          NotesPopup(width: 400, height: 210, dim: true, onOutside: { showClear = false }) {
+            VStack(alignment: .leading, spacing: 18) {
+              Text("确认清空本页全部批注吗？").font(DS.font(.cardTitle))
+              Text("取消将保留当前笔迹；清空后仍可使用撤销恢复。").font(DS.font(.supporting)).foregroundStyle(DS.secondary)
+              HStack {
+                BCButton("取消", style: .secondary) { showClear = false }
+                BCButton("清空", style: .danger) {
+                  canvas.clear()
+                  showClear = false
+                }
+              }
+            }.padding(24)
+          }
+        }
+      }
+  }
+  private var pageWidth: CGFloat {
+    let ratio = pageImage.map { $0.size.height / $0.size.width } ?? 920 / 650
+    guard availableWidth > 0, availableHeight > 0 else {
+      return min(650, UIScreen.main.bounds.width)
+    }
+    return min(availableWidth, availableHeight / ratio)
+  }
+  private var header: some View {
+    HStack(alignment: .top, spacing: 0) {
+      Button {
+        Task { if await flushInk() { store.back() } }
+      } label: {
+        Image(systemName: "arrow.left").font(.system(size: 18)).foregroundStyle(DS.text).iconButtonFrame()
+        .background(.white, in: RoundedRectangle(cornerRadius: 12)).overlay(
+          RoundedRectangle(cornerRadius: 12).stroke(DS.border))
+      }.offset(y: DS.navigationButtonOffset)
+        .accessibilityLabel("返回").accessibilityIdentifier("navigation.back")
+      Button {
+        showPageControls = true
+      } label: {
+        Text(heading).font(DS.font(.pageTitle)).foregroundStyle(DS.text).lineLimit(1)
+          .frame(maxWidth: .infinity, alignment: .leading).buttonFrame()
+      }
+      .buttonStyle(.plain).accessibilityLabel("\(heading)，PDF第\(page)页，点击跳转")
+      .accessibilityIdentifier("reader.heading")
+      .popover(isPresented: $showPageControls) {
+        VStack(spacing: 14) {
+          Text("PDF 第 \(page) 页 / \(maxPage) 页").font(DS.font(.supporting, weight: .semibold))
+          pager
+          Button("缩放 \(Int(zoom * 100))%") {
+            zoom = zoom >= 2 ? 1 : zoom + 0.25
+            magnifyBase = zoom
+          }.font(DS.font(.supporting)).padding(.horizontal, DS.ButtonSize.regular.horizontalPadding).buttonFrame()
+        }.padding(20).frame(width: 330).presentationCompactAdaptation(.popover)
+      }
+      if saving { ProgressView().scaleEffect(0.7).accessibilityLabel("正在保存笔迹") }
+    }.frame(height: DS.navigationRowHeight).padding(.horizontal, store.isPad ? 32 : 16)
+      .padding(.top, NotesScreenMetrics.titleTopInset).padding(.bottom, 1)
+      .background { Color.white.ignoresSafeArea(edges: .top) }
+  }
+  private var tools: some View {
+    HStack(spacing: 4) {
+      tool("Sparkles", label: "圈选问 AI", selected: mode == .ai) { changeMode(.ai, toggle: true) }
+        .foregroundStyle(DS.primary)
+      Divider().frame(height: 34)
+      if !store.isPad {
+        noteShortcuts
+        Divider().frame(height: 34)
+      }
+      ScrollView(.horizontal, showsIndicators: false) {
+        HStack(spacing: 3) {
+          tool("PenLine", label: "钢笔", selected: mode == .ink && pen == .pen) { selectPen(.pen) }
+            .disabled(mode == .text || pageImage == nil)
+          tool("Highlighter", label: "荧光笔", selected: mode == .ink && pen == .marker) {
+            selectPen(.marker)
+          }.disabled(mode == .text || pageImage == nil)
+          tool("Eraser", label: "整笔擦除", selected: mode == .ink && pen == .eraser) {
+            selectPen(.eraser)
+          }.disabled(mode == .text || pageImage == nil)
+          tool("Undo2", label: "撤销") { canvas.undo() }.opacity(mode == .ink ? 1 : 0.42)
+          tool("Redo2", label: "重做") { canvas.redo() }.opacity(mode == .ink ? 1 : 0.42)
+          tool("Trash2", label: "清空本页批注") { showClear = true }.opacity(mode == .ink ? 1 : 0.42)
+          ForEach([0x7c3aed, 0x2563eb, 0xdc2626, 0x20263a], id: \.self) { value in
+            Button {
+              colorHex = UInt(value)
+              color = UIColor(Color(hex: UInt(value)))
+              if mode != .ink { changeMode(.ink) }
+            } label: {
+              Circle().fill(Color(hex: UInt(value))).frame(width: 20, height: 20).padding(7)
+                .overlay(
+                  Circle().stroke(DS.primary, lineWidth: 2).padding(1).opacity(
+                    colorHex == UInt(value) ? 1 : 0)
+                )
+                .iconButtonFrame()
+            }.accessibilityLabel("笔迹颜色 \(value)")
+          }
+          ForEach([CGFloat(1.5), 3, 6], id: \.self) { value in
+            Button {
+              width = value
+              if mode != .ink { changeMode(.ink) }
+            } label: {
+              Circle().fill(width == value ? DS.primary : DS.secondary).frame(
+                width: value + 4, height: value + 4
+              ).iconButtonFrame().background(
+                width == value ? DS.primarySoft : .clear, in: RoundedRectangle(cornerRadius: 10))
+            }.accessibilityLabel("笔迹粗细 \(Int(value))")
+          }
+          tool("Hand", label: "手指书写", selected: finger) { finger.toggle() }
+        }
+      }
+      if store.isPad {
+        Divider().frame(height: 34)
+        noteShortcuts
+      }
+    }.padding(.horizontal, 8).frame(height: 56).background(.white).overlay(alignment: .bottom) {
+      Rectangle().fill(DS.border).frame(height: 1)
+    }
+  }
+  private var noteShortcuts: some View {
+    HStack(spacing: 2) {
+      tool("FileText", label: "批注", selected: mode == .text) { changeMode(.text, toggle: true) }
+      tool("NotebookPen", label: "本页笔记 \(pageNotes.count) 条", selected: showNotes) {
+        showNotes.toggle()
+        changeMode(.read)
+      }.opacity(pageNotes.isEmpty ? 0.45 : 1)
+    }
+  }
+  private func tool(
+    _ icon: String, label: String, selected: Bool = false, action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      NotesGlyph(name: icon, size: 20).foregroundStyle(
+        icon == "Sparkles" || selected ? DS.primary : DS.secondary
+      ).iconButtonFrame().background(
+        selected ? DS.primarySoft : .clear, in: RoundedRectangle(cornerRadius: 10))
+    }
+    .buttonStyle(.plain).accessibilityLabel(label).accessibilityAddTraits(
+      selected ? .isSelected : [])
+  }
+  private var pageContent: some View {
+    let ratio = pageImage.map { $0.size.height / $0.size.width } ?? 1.4
+    let size = CGSize(width: pageWidth, height: pageWidth * ratio)
+    return ZStack(alignment: .topLeading) {
+      if let imagePath {
+        AssetImage(imagePath).frame(width: size.width, height: size.height)
+      } else if let pdf {
+        NotesPDFPage(document: pdf, page: page, selectedText: $selectedText).allowsHitTesting(
+          mode == .read)
+      } else if let image = pageImage {
+        Image(uiImage: image).resizable().scaledToFit()
+      } else {
+        VStack(alignment: .leading, spacing: 18) {
+          Text(pageText.isEmpty ? "原文资源未发布" : heading).font(DS.font(.sectionTitle))
+          Text(pageText.isEmpty ? "当前教材只有目录或尚未提供该页原文。请返回课程资料查看。" : pageText).font(DS.font(.reading))
+            .lineSpacing(9).textSelection(.enabled)
+        }.padding(24).frame(width: size.width, height: size.height, alignment: .topLeading)
+          .background(.white)
+      }
+      NotesDrawingCanvas(
+        data: $drawingData, controller: canvas, pen: pen, color: color, width: width,
+        finger: finger, active: mode == .ink
+      )
+      .allowsHitTesting(mode == .ink)
+      if mode == .text {
+        Color.clear.contentShape(Rectangle()).onTapGesture { location in
+          createAnnotation(
+            at: UnitPointValue(
+              x: min(1, max(0, location.x / size.width)),
+              y: min(1, max(0, location.y / size.height))))
+        }
+      }
+      ForEach(pageNotes.filter { $0.kind != .ink }) { note in
+        if let point = note.position {
+          Button {
+            editor = note
+          } label: {
+            StickerIcon(note.kind.notesIcon, tone: note.kind.notesTone, size: 28).iconButtonFrame()
+              .background(.white, in: Circle()).shadow(radius: 3)
+          }
+          .position(x: CGFloat(point.x) * size.width, y: CGFloat(point.y) * size.height)
+          .accessibilityLabel("打开批注：\(note.title)")
+        }
+      }
+      if mode == .ai {
+        Color.clear.contentShape(Rectangle()).gesture(
+          DragGesture(minimumDistance: 2)
+            .onChanged { value in
+              region = selectionRect(from: value.startLocation, to: value.location, in: size)
+            }
+            .onEnded { value in
+              // Use the release point, not the last drag sample, as the opposite corner.
+              region = selectionRect(from: value.startLocation, to: value.location, in: size)
+              captureRegion(size: size)
+            })
+        if let region {
+          Path { $0.addRect(region) }
+            .fill(DS.primary.opacity(0.08))
+            .overlay {
+              Path { $0.addRect(region) }
+                .stroke(DS.primary, style: StrokeStyle(lineWidth: 2, dash: [6, 3]))
+            }
+            .allowsHitTesting(false)
+        }
+      }
+    }.frame(width: size.width, height: size.height).background(.white).clipped()
+      .scaleEffect(zoom, anchor: .topLeading).frame(
+        width: size.width * zoom, height: size.height * zoom, alignment: .topLeading
+      )
+      .accessibilityElement(children: .contain)
+      .accessibilityIdentifier("reader.page")
+      .simultaneousGesture(
+        MagnifyGesture().onChanged { value in
+          guard mode == .read else { return }
+          zoom = min(3, max(1, magnifyBase * value.magnification))
+        }.onEnded { _ in magnifyBase = zoom }
+      )
+      .simultaneousGesture(
+        DragGesture(minimumDistance: 60).onEnded { value in
+          guard mode == .read, zoom == 1,
+            abs(value.translation.width) > max(65, abs(value.translation.height) * 1.5)
+          else { return }
+          changePage(page + (value.translation.width < 0 ? 1 : -1))
+        })
+  }
+  private var pager: some View {
+    HStack(spacing: 10) {
+      Button("上一页") { changePage(page - 1) }.buttonFrame().disabled(page <= 1)
+      Spacer(minLength: 4)
+      TextField("页码", text: $pageInput).keyboardType(.numberPad).multilineTextAlignment(.center)
+        .frame(width: 48, height: 40).background(.white, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(DS.border)).accessibilityIdentifier(
+          "reader.pageInput")
+      Button("跳转") { changePage(Int(pageInput) ?? page) }.buttonFrame().accessibilityIdentifier("reader.jump")
+      Spacer(minLength: 4)
+      Button("下一页") { changePage(page + 1) }.buttonFrame().disabled(page >= maxPage)
+    }.font(DS.font(.supporting, weight: .semibold)).foregroundStyle(DS.primary).padding(.vertical, 6)
+  }
+  private var inkReview: some View {
+    BCCard {
+      VStack(alignment: .leading, spacing: 12) {
+        BCPill("原始笔迹保存在本机")
+        Text("请确认识别文字").font(DS.font(.cardTitle))
+        Text("演示模式提供预设识别和整理结果。你可以编辑文字，原始笔迹保存在本机。").font(DS.font(.caption)).foregroundStyle(DS.muted)
+        if inkPhase == "recognizing" || inkPhase == "organizing" {
+          ProgressView(inkPhase == "recognizing" ? "正在识别真实笔迹…" : "正在整理确认后的文字…")
+        }
+        if let inkServiceError { Text(inkServiceError).font(DS.font(.caption)).foregroundStyle(DS.danger) }
+        BCTextEditor(text: $recognizedText, placeholder: "确认或手动填写笔记文字").frame(minHeight: 120)
+          .disabled(inkTask != nil)
+        BCButton("只保存确认文字", style: .secondary) { Task { _ = await saveConfirmedInk() } }
+          .disabled(inkTask != nil || recognizedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        BCButton("确认并继续整理", icon: "Save") { organizeInk() }
+          .disabled(inkTask != nil || recognizedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        BCButton("重新查询识别", style: .text) { recognizeInk() }.disabled(inkTask != nil)
+        if !organizedText.isEmpty {
+          Text(organizedAccepted ? "已保留的独立整理版" : "整理建议 · 待确认").font(DS.font(.supporting, weight: .semibold)).foregroundStyle(DS.primary)
+          Text(organizedText).font(DS.font(.supporting)).lineSpacing(5).textSelection(.enabled)
+          if !organizedAccepted {
+            BCButton("保留整理版", style: .secondary) { keepInkOrganized() }.disabled(inkTask != nil)
+          }
+        }
+        BCButton("收起整理面板", style: .text) { inkTask?.cancel(); showInkReview = false }
+      }
+    }
+  }
+  private var pageNotesList: some View {
+    BCCard {
+      VStack(alignment: .leading, spacing: 10) {
+        Text("本页已有笔记 · \(pageNotes.count)").font(DS.font(.supporting, weight: .semibold))
+        ForEach(pageNotes) { note in
+          Button {
+            if note.kind == .ink {
+              mode = .ink
+              Task { await loadInk(note) }
+            } else {
+              editor = note
+            }
+          } label: {
+            HStack {
+              Text(note.kind.notesLabel).foregroundStyle(DS.primary)
+              Text(note.title).lineLimit(1)
+              Spacer()
+            }.font(DS.font(.supporting)).padding(.horizontal, DS.ButtonSize.regular.horizontalPadding).buttonFrame().background(
+              DS.primarySoft, in: RoundedRectangle(cornerRadius: 10))
+          }
+        }
+      }
+    }
+  }
+  private func closeRegion() {
+    if let note = regionNote { editor = store.notes.first { $0.id == note.id } ?? note }
+    showRegion = false
+    regionNote = nil
+    region = nil
+  }
+  private func selectionRect(from start: CGPoint, to end: CGPoint, in size: CGSize) -> CGRect {
+    let x1 = min(size.width, max(0, start.x))
+    let y1 = min(size.height, max(0, start.y))
+    let x2 = min(size.width, max(0, end.x))
+    let y2 = min(size.height, max(0, end.y))
+    return CGRect(x: min(x1, x2), y: min(y1, y2),
+      width: abs(x2 - x1), height: abs(y2 - y1))
+  }
+  private func captureRegion(size: CGSize) {
+    guard let rect = region?.intersection(CGRect(origin: .zero, size: size)),
+      rect.width > 8, rect.height > 8, size.width > 0, size.height > 0 else {
+      region = nil
+      return
+    }
+    regionPreview = nil
+    guard let image = pageImage, let cg = image.cgImage else {
+      region = nil
+      error = "原文图片尚未就绪，请稍后重新框选。"
+      return
+    }
+    let sx = CGFloat(cg.width) / size.width
+    let sy = CGFloat(cg.height) / size.height
+    let pixels = CGRect(x: rect.minX * sx, y: rect.minY * sy,
+      width: rect.width * sx, height: rect.height * sy).integral
+      .intersection(CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+    guard let crop = cg.cropping(to: pixels) else {
+      region = nil
+      error = "无法截取框选区域，请重新框选。"
+      return
+    }
+    regionPreview = UIImage(cgImage: crop)
+    error = nil
+    regionNote = nil
+    regionSession = UUID()
+    showRegion = true
+  }
+  private func makeAnchor() -> NoteAnchor {
+    var anchor = NoteAnchor(bookID: bookID, page: page)
+    anchor.courseID = capturedCourseID
+    anchor.courseResourceID = store.courseResourceID(courseID: capturedCourseID, bookID: bookID)
+    anchor.chapterID = chapter?.chapter_id
+    anchor.printedPage = chapter?.printed_page_start.map {
+      $0 + page - (chapter?.page_start ?? page)
+    }
+    anchor.quote = selectedText.isEmpty ? nil : selectedText
+    return anchor
+  }
+  private func createAnnotation(at position: UnitPointValue) {
+    guard store.courseResourceID(courseID: capturedCourseID, bookID: bookID) != nil else {
+      error = "无指定课程，无法进行笔记撰写"; return
+    }
+    var note = StudyNote(kind: .text, title: heading, body: "")
+    note.anchor = makeAnchor()
+    note.position = position
+    editor = note
+  }
+  private func selectPen(_ next: NotesPen) {
+    guard mode != .text, pageImage != nil else { return }
+    let selected = mode == .ink && pen == next
+    pen = next
+    changeMode(selected ? .read : .ink)
+  }
+  private func changeMode(_ next: NotesReaderMode, toggle: Bool = false) {
+    if next != .read, store.courseResourceID(courseID: capturedCourseID, bookID: bookID) == nil {
+      error = "无指定课程，无法进行笔记撰写"; return
+    }
+    Task {
+      if await flushInk() {
+        mode = toggle && next == mode ? .read : next
+        region = nil
+      }
+    }
+  }
+  private func changePage(_ candidate: Int) {
+    let next = min(maxPage, max(1, candidate))
+    guard next != page else {
+      pageInput = "\(page)"
+      return
+    }
+    Task {
+      guard await flushInk() else { return }
+      pageForward = next > page
+      withAnimation(reduceMotion ? nil : DS.globalAnimation) {
+        page = next
+        pageInput = "\(page)"
+      }
+      NotesReadingPosition.save(page, courseID: capturedCourseID, bookID: bookID, store: store)
+      closeRegion()
+      editor = nil
+      selectedText = ""
+      zoom = 1
+      magnifyBase = 1
+      showInkReview = false
+      ready = false
+      drawingData = Data()
+      inkNote = nil
+      refreshMedia()
+      await loadInk()
+    }
+  }
+  private func initialize() async {
+    store.selectedQuote = ""
+    capturedTarget = store.sourceTarget
+    capturedCourseID = capturedTarget?.courseID
+    capturedBookID = capturedTarget?.bookID ?? store.selectedBookID
+    page = NotesReadingPosition.initialPage(
+      courseID: capturedCourseID, bookID: bookID, target: capturedTarget,
+      locations: store.locations, pageCount: maxPage)
+    pageInput = "\(page)"
+    NotesReadingPosition.save(page, courseID: capturedCourseID, bookID: bookID, store: store)
+    refreshMedia()
+    if let pending = NotesCaptureContext.pendingKind {
+      mode = pending == .ink ? .ink : pending == .text ? .text : .read
+    }
+    let existing = NotesCaptureContext.existingNoteID.flatMap { id in
+      store.notes.first { $0.id == id }
+    }
+    NotesCaptureContext.pendingKind = nil
+    NotesCaptureContext.existingNoteID = nil
+    if let existing, existing.kind != .ink { editor = existing }
+    await loadInk(existing?.kind == .ink ? existing : nil)
+  }
+  private func loadInk(_ existing: StudyNote? = nil) async {
+    ready = false
+    let generation = UUID()
+    loadGeneration = generation
+    let record = existing ?? pageNotes.first { $0.kind == .ink }
+    var data = Data()
+    if let path = record?.drawingPath {
+      data = (try? Data(contentsOf: store.attachmentURL(path))) ?? Data()
+    }
+    guard loadGeneration == generation else { return }
+    inkNote = record
+    lastSavedDrawing = data
+    drawingData = data
+    inkDirty = false
+    inkTask?.cancel()
+    showInkReview = false
+    inkServiceError = nil
+    inkRemoteNote = nil
+    inkResultJob = nil
+    recognizedText = record?.transcript ?? (record?.body == "手写笔迹已保存，尚未整理。" ? "" : record?.body ?? "")
+    organizedText = record?.organizedText ?? ""
+    organizedAccepted = true
+    inkPhase = "idle"
+    await Task.yield()
+    guard loadGeneration == generation else { return }
+    ready = true
+  }
+  private func recognizeInk() {
+    guard inkTask == nil else { return }
+    showInkReview = true
+    inkServiceError = nil
+    inkPhase = "recognizing"
+    reviewedDrawing = drawingData
+    let original = drawingData
+    let generation = loadGeneration
+    let epoch = store.cloudState.epoch
+    inkTask = Task { @MainActor in
+      defer { inkTask = nil }
+      do {
+        guard await flushInk(), let note = inkNote else {
+          throw CloudError(status: 409, message: "请先写下并保存笔迹，正在保存时可稍后重试。")
+        }
+        if MockEnvironment.enabled {
+          try await Task.sleep(for: .milliseconds(900))
+          try Task.checkCancellation()
+          guard generation == loadGeneration, epoch == store.cloudState.epoch,
+            drawingData == original, inkNote?.id == note.id else { return }
+          recognizedText = MockAssistantService.transcript
+          inkPhase = "confirmation"
+          return
+        }
+        guard let api = store.cloud, store.cloudState.authenticated else {
+          throw CloudError(status: 503, message: "尚未连接手写识别服务，原始笔迹已保存在本机；也可以手动填写文字。")
+        }
+        let service = StudioService(api: api)
+        let remote = try await service.prepareInk(note: note, drawingData: original)
+        let submitted = try await service.analyze(note: remote, action: "recognize", retryFailed: true)
+        let result = try await service.waitForJob(submitted)
+        try Task.checkCancellation()
+        guard generation == loadGeneration, epoch == store.cloudState.epoch,
+          drawingData == original, inkNote?.id == note.id else { return }
+        guard !result.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+          throw CloudError(status: 422, message: "未返回可确认的识别文字，请按原始笔迹手动填写。")
+        }
+        inkRemoteNote = remote
+        recognizedText = result.transcript
+        inkPhase = "confirmation"
+      } catch is CancellationError { return }
+      catch {
+        guard generation == loadGeneration, epoch == store.cloudState.epoch else { return }
+        inkServiceError = error.localizedDescription
+        inkPhase = "confirmation"
+      }
+    }
+  }
+  @discardableResult private func saveConfirmedInk() async -> Bool {
+    guard var note = inkNote else { return false }
+    let generation = loadGeneration
+    let epoch = store.cloudState.epoch
+    note = NotesAnnotationRecord.mergingConversation(draft: note, stored: store.notes.first { $0.id == note.id })
+    note.body = recognizedText
+    note.transcript = recognizedText
+    note.updatedAt = .now
+    do {
+      try await store.saveNote(note)
+      guard generation == loadGeneration, epoch == store.cloudState.epoch, inkNote?.id == note.id else { return false }
+      inkNote = note
+      return true
+    } catch {
+      guard generation == loadGeneration, epoch == store.cloudState.epoch else { return false }
+      inkServiceError = "笔记文字尚未保存，请重试：" + error.localizedDescription
+      return false
+    }
+  }
+  private func organizeInk() {
+    guard inkTask == nil else { return }
+    inkServiceError = nil
+    inkPhase = "organizing"
+    let original = drawingData
+    let confirmed = recognizedText
+    let generation = loadGeneration
+    let epoch = store.cloudState.epoch
+    inkTask = Task { @MainActor in
+      defer { inkTask = nil }
+      do {
+        guard await saveConfirmedInk(), let note = inkNote else {
+          throw CloudError(status: 409, message: "请先保存确认后的文字。")
+        }
+        if MockEnvironment.enabled {
+          try await Task.sleep(for: .milliseconds(1000))
+          try Task.checkCancellation()
+          guard generation == loadGeneration, epoch == store.cloudState.epoch,
+            drawingData == original, inkNote?.id == note.id, recognizedText == confirmed else { return }
+          organizedText = MockAssistantService.organizedNote
+          organizedAccepted = false
+          inkPhase = "complete"
+          return
+        }
+        guard let api = store.cloud, store.cloudState.authenticated else {
+          throw CloudError(status: 503, message: "整理服务尚未连接，原始笔迹和确认文字仍保存在本机。")
+        }
+        let service = StudioService(api: api)
+        let remote = try await service.prepareInk(note: note, drawingData: original)
+        let submitted = try await service.analyze(note: remote, action: "improve", transcript: confirmed, retryFailed: true)
+        let result = try await service.waitForJob(submitted)
+        try Task.checkCancellation()
+        guard generation == loadGeneration, epoch == store.cloudState.epoch,
+          drawingData == original, inkNote?.id == note.id, recognizedText == confirmed else { return }
+        guard result.status == "succeeded", !result.polished.isEmpty else {
+          throw CloudError(status: 409, message: "服务没有返回可采用的整理版，请继续核对原稿。")
+        }
+        inkRemoteNote = remote
+        inkResultJob = result
+        organizedText = result.polished
+        organizedAccepted = false
+        inkPhase = "complete"
+      } catch is CancellationError { return }
+      catch {
+        guard generation == loadGeneration, epoch == store.cloudState.epoch else { return }
+        inkServiceError = error.localizedDescription
+        inkPhase = "confirmation"
+      }
+    }
+  }
+  private func keepInkOrganized() {
+    guard inkTask == nil else { return }
+    let generation = loadGeneration
+    let epoch = store.cloudState.epoch
+    inkTask = Task { @MainActor in
+      defer { inkTask = nil }
+      do {
+        if MockEnvironment.enabled {
+          guard var note = inkNote else { return }
+          try await Task.sleep(for: .milliseconds(500))
+          try Task.checkCancellation()
+          guard generation == loadGeneration, epoch == store.cloudState.epoch else { return }
+          note.organizedText = organizedText
+          note.updatedAt = .now
+          _ = try await store.saveNote(note)
+          inkNote = note
+          organizedAccepted = true
+          return
+        }
+        guard let api = store.cloud, let inkRemoteNote, let inkResultJob, var note = inkNote else {
+          throw CloudError(status: 409, message: "整理结果尚未确认，请重新查询。")
+        }
+        try await StudioService(api: api).accept(note: inkRemoteNote, job: inkResultJob)
+        guard generation == loadGeneration, epoch == store.cloudState.epoch else { return }
+        note = NotesAnnotationRecord.mergingConversation(draft: note, stored: store.notes.first { $0.id == note.id })
+        note.organizedText = organizedText
+        note.updatedAt = .now
+        try await store.saveNote(note)
+        inkNote = note
+        organizedAccepted = true
+      } catch {
+        guard generation == loadGeneration, epoch == store.cloudState.epoch else { return }
+        inkServiceError = "整理版尚未保存：" + error.localizedDescription
+      }
+    }
+  }
+  @discardableResult private func flushInk() async -> Bool {
+    guard inkDirty else { return true }
+    guard !saving else { return false }
+    saving = true
+    error = nil
+    let data = drawingData
+    let notePage = page
+    var note = inkNote ?? StudyNote(kind: .ink, title: "\(heading) · 手写批注", body: "手写笔迹已保存，尚未整理。")
+    note.anchor = makeAnchor()
+    note.updatedAt = .now
+    do {
+      note.drawingPath = try await store.saveAttachment(data, extension: "drawing")
+      try await store.saveNote(note)
+      if page == notePage {
+        inkNote = note
+        lastSavedDrawing = data
+        inkDirty = drawingData != data
+      }
+      saving = false
+      return true
+    } catch {
+      self.error = "笔迹保存失败：\(error.localizedDescription)"
+      saving = false
+      return false
+    }
+  }
+}
+
+@MainActor final class NotesCanvasController {
+  weak var canvas: PKCanvasView?
+  func undo() { canvas?.undoManager?.undo() }
+  func redo() { canvas?.undoManager?.redo() }
+  func clear() {
+    canvas?.drawing = PKDrawing()
+    if let canvas { canvas.delegate?.canvasViewDrawingDidChange?(canvas) }
+  }
+}
+
+private struct NotesDrawingCanvas: UIViewRepresentable {
+  @Binding var data: Data
+  let controller: NotesCanvasController
+  let pen: NotesPen
+  let color: UIColor
+  let width: CGFloat
+  let finger: Bool
+  let active: Bool
+  func makeCoordinator() -> Coordinator { Coordinator(self) }
+  func makeUIView(context: Context) -> PKCanvasView {
+    let view = NotesSizedCanvas()
+    view.backgroundColor = .clear
+    view.isOpaque = false
+    view.isScrollEnabled = false
+    view.delegate = context.coordinator
+    view.minimumZoomScale = 1
+    view.maximumZoomScale = 1
+    controller.canvas = view
+    view.onSize = { [weak coordinator = context.coordinator] size in coordinator?.resize(size) }
+    return view
+  }
+  func updateUIView(_ view: PKCanvasView, context: Context) {
+    context.coordinator.owner = self
+    view.isUserInteractionEnabled = active
+    view.drawingPolicy = finger ? .anyInput : .pencilOnly
+    view.tool =
+      pen == .eraser
+      ? PKEraserTool(.vector)
+      : PKInkingTool(
+        pen == .marker ? .marker : .pen, color: color, width: pen == .marker ? width * 5 : width)
+    context.coordinator.apply(data)
+  }
+  final class Coordinator: NSObject, PKCanvasViewDelegate {
+    var owner: NotesDrawingCanvas
+    var lastData = Data()
+    var width: CGFloat = 0
+    var applying = false
+    init(_ owner: NotesDrawingCanvas) { self.owner = owner }
+    func resize(_ size: CGSize) {
+      guard size.width > 0, width != size.width, let canvas = owner.controller.canvas else {
+        return
+      }
+      applying = true
+      if width > 0 {
+        canvas.drawing = canvas.drawing.transformed(
+          using: CGAffineTransform(scaleX: size.width / width, y: size.width / width))
+      } else if let normalized = try? PKDrawing(data: owner.data) {
+        canvas.drawing = NotesDrawingCoordinates.displayed(normalized, displayWidth: size.width)
+      }
+      width = size.width
+      applying = false
+    }
+    func apply(_ data: Data) {
+      guard lastData != data, let canvas = owner.controller.canvas else { return }
+      applying = true
+      canvas.drawing = NotesDrawingCoordinates.displayed(
+        (try? PKDrawing(data: data)) ?? PKDrawing(), displayWidth: max(width, 1))
+      lastData = data
+      applying = false
+    }
+    func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
+      guard !applying, width > 0 else { return }
+      let normalized = NotesDrawingCoordinates.normalized(canvasView.drawing, displayWidth: width)
+        .dataRepresentation()
+      lastData = normalized
+      owner.data = normalized
+    }
+  }
+}
+private final class NotesSizedCanvas: PKCanvasView {
+  var onSize: ((CGSize) -> Void)?
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    onSize?(bounds.size)
+  }
+}
+private struct NotesPDFPage: UIViewRepresentable {
+  func makeCoordinator() -> Coordinator { Coordinator(self) }
+  final class Coordinator: NSObject {
+    var owner: NotesPDFPage
+    var page = -1
+    weak var view: PDFView?
+    init(_ owner: NotesPDFPage) { self.owner = owner }
+    @objc func selectionChanged() { owner.selectedText = view?.currentSelection?.string ?? "" }
+    deinit { NotificationCenter.default.removeObserver(self) }
+  }
+  let document: PDFDocument
+  let page: Int
+  @Binding var selectedText: String
+  func makeUIView(context: Context) -> PDFView {
+    let view = PDFView()
+    view.backgroundColor = .white
+    view.autoScales = true
+    view.displayMode = .singlePage
+    view.displayDirection = .vertical
+    context.coordinator.view = view
+    NotificationCenter.default.addObserver(
+      context.coordinator, selector: #selector(Coordinator.selectionChanged),
+      name: .PDFViewSelectionChanged, object: view)
+    return view
+  }
+  func updateUIView(_ view: PDFView, context: Context) {
+    context.coordinator.owner = self
+    guard context.coordinator.page != page else { return }
+    context.coordinator.page = page
+    let one = PDFDocument()
+    if let source = document.page(at: page - 1)?.copy() as? PDFPage { one.insert(source, at: 0) }
+    view.document = one
+    view.autoScales = true
+  }
+}
+
+/// The reader keeps its own conversation. A source crop and a text annotation
+/// never inherit unrelated messages from the global assistant.
+struct NotesRegionAIView: View {
+  @Environment(AppStore.self) private var store
+  @Environment(\.bookCourseReduceMotion) private var reduceMotion
+  @State private var keyboardTop = CGFloat.greatestFiniteMagnitude
+  let bookID: String
+  let chapterID: String?
+  let page: Int
+  let pageText: String
+  let referenceImage: UIImage?
+  let note: StudyNote?
+  var onClose: () -> Void
+  @State private var messages: [ChatMessage] = []
+  @State private var temporarySessionID = UUID().uuidString
+  @State private var frozenContext: AgentFrozenContext?
+  @State private var contextTokens = 0
+  @State private var capacityLocked = false
+  @State private var showingCapacityAlert = false
+  @State private var temporaryAttachments: [AssistantAttachment] = []
+  @State private var pendingAttachments: [AssistantAttachment] = []
+  @State private var regionAttachment: AssistantAttachment?
+  @State private var showingAttachmentChoices = false
+  @State private var showingPhotos = false
+  @State private var showingFiles = false
+  @State private var selectedPhotos: [PhotosPickerItem] = []
+  @State private var addingAttachments = false
+  @State private var importTask: Task<Void, Never>?
+  @State private var voice = AssistantVoiceInput.configured()
+  @State private var keyboardDismissalID = 0
+  @State private var loading = false
+  @State private var issue: String?
+  @State private var failedQuestion: String?
+  @State private var request: Task<Void, Never>?
+  private var isTextNote: Bool { note != nil }
+  var body: some View {
+    AssistantConversationPanel(isPad: store.isPad, voiceMode: voice.isVoiceMode,
+      keyboardTop: keyboardTop, dismissKeyboard: { keyboardDismissalID += 1 }) {
+      AssistantConversationHeader(title: isTextNote ? "批注 AI 对话" : "AI问") {
+          HStack {
+            Spacer()
+            Button(action: onClose) {
+              Image(systemName: "xmark").font(.system(size: 17, weight: .medium))
+                .foregroundStyle(DS.text).iconButtonFrame()
+                .modifier(AssistantGlassSurface(radius: 22))
+            }.buttonStyle(.plain).accessibilityLabel("关闭")
+          }
+      }
+    } content: { bottomInset in
+        ScrollViewReader { proxy in
+          ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+              ForEach(messages) { message in
+                VStack(alignment: .leading, spacing: 8) {
+                  bubble(message.text, user: message.role == "user")
+                    .accessibilityIdentifier(message.role == "user" ? "reader.regionQuestion" : loading ? "reader.regionPendingReply" : "reader.regionReply")
+                  if message.role != "user", let label = message.sourceLabelText {
+                    Text(label).font(DS.font(.caption)).foregroundStyle(DS.secondary)
+                      .accessibilityIdentifier("reader.regionSourceLabel")
+                  }
+                  if !message.citations.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                      HStack(spacing: 6) {
+                        BCGlyph("BookOpenCheck", color: DS.primary).frame(width: 13, height: 13)
+                        Text("教材原文依据").font(DS.font(.caption, weight: .semibold)).foregroundStyle(DS.primary)
+                      }
+                      ForEach(message.citations) { citation in
+                        VStack(alignment: .leading, spacing: 4) {
+                          Text("\(citation.chapterTitle) · 教材第 \(citation.printedPage ?? citation.page) 页")
+                            .font(DS.font(.caption, weight: .semibold)).foregroundStyle(DS.secondary)
+                          Text(citation.quote).font(DS.font(.caption)).lineSpacing(4)
+                            .foregroundStyle(DS.secondary).padding(.leading, 8)
+                            .overlay(alignment: .leading) { Rectangle().fill(DS.primary.opacity(0.25)).frame(width: 2) }
+                          Button("查看原文") {
+                            onClose()
+                            store.openCitation(citation)
+                          }.font(DS.font(.caption, weight: .semibold)).foregroundStyle(DS.primary).buttonFrame()
+                        }
+                      }
+                    }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                      .background(DS.background, in: RoundedRectangle(cornerRadius: 12))
+                      .overlay(RoundedRectangle(cornerRadius: 12).stroke(DS.border))
+                  } else if message.role != "user", message.text.contains("可靠") {
+                    Text("当前教材未检索到可靠原文").font(DS.font(.caption, weight: .semibold)).foregroundStyle(DS.muted)
+                  }
+                }.id(message.id)
+              }
+              if !loading, let run = store.agent.active, run.context.sessionID == temporarySessionID,
+                run.scope == store.noteScope, run.status.isTerminal {
+                AssistantResultActions(run: run, onNavigate: onClose)
+              }
+              if loading {
+                bubble(isTextNote ? "正在结合批注和教材回答…" : "正在结合圈选内容回答…", user: false, pending: true)
+              }
+              if let issue {
+                Text(issue).font(DS.font(.caption)).foregroundStyle(DS.danger)
+                if let failedQuestion {
+                  Button("重试提问") { ask(failedQuestion) }
+                    .font(DS.font(.supporting, weight: .semibold)).foregroundStyle(DS.primary)
+                    .buttonFrame().accessibilityIdentifier("reader.regionRetry")
+                }
+              }
+              Color.clear.frame(height: 1).id("reader.regionTranscriptEnd")
+            }.padding(.bottom, bottomInset).frame(maxWidth: .infinity, alignment: .leading)
+          }.scrollDismissesKeyboard(.interactively)
+            .onChange(of: messages.count) { _, _ in proxy.scrollTo("reader.regionTranscriptEnd", anchor: .bottom) }
+            .onChange(of: loading) { _, _ in proxy.scrollTo("reader.regionTranscriptEnd", anchor: .bottom) }
+        }.frame(maxHeight: .infinity)
+    } composer: { textInset in
+        VStack(alignment: .leading, spacing: 8) {
+          if let run = store.agent.active, run.context.sessionID == temporarySessionID, let choice = run.pendingChoice {
+            Text(choice.question).font(DS.font(.supporting))
+            ForEach(choice.options, id: \.self) { option in
+              Button(option) { store.agent.choose(option) }
+            }
+          }
+          AssistantComposer(voice: voice, keyboardDismissalID: keyboardDismissalID,
+            busy: loading || capacityLocked,
+            placeholder: isTextNote ? "问问这条批注…" : "针对圈选内容提问…",
+            attachments: pendingAttachments, addingAttachments: addingAttachments,
+            attachmentImportStatus: "正在读取附件…",
+            showAttachmentChoices: { showingAttachmentChoices = true },
+            removeAttachment: { id in pendingAttachments.removeAll { $0.id == id } },
+            textHorizontalInset: textInset, contextTokens: contextTokens,
+            referenceImage: referenceImage,
+            send: { ask(voice.draft) })
+            .disabled(capacityLocked)
+        }.fixedSize(horizontal: false, vertical: true)
+    }
+    .ignoresSafeArea(.container, edges: .bottom)
+    .ignoresSafeArea(.keyboard, edges: .bottom)
+    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+      let top = (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect)?.minY
+        ?? .greatestFiniteMagnitude
+      withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { keyboardTop = top }
+    }
+    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+      withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { keyboardTop = .greatestFiniteMagnitude }
+    }
+    .confirmationDialog("添加附件", isPresented: $showingAttachmentChoices, titleVisibility: .visible) {
+      Button("照片") { showingPhotos = true }
+      Button("文件") { showingFiles = true }
+      Button("取消", role: .cancel) { }
+    }
+    .photosPicker(isPresented: $showingPhotos, selection: $selectedPhotos,
+      maxSelectionCount: max(1, AssistantAttachment.maximumCount - pendingAttachments.count), matching: .images)
+    .fileImporter(isPresented: $showingFiles, allowedContentTypes: AssistantAttachment.allowedTypes,
+      allowsMultipleSelection: true) { result in
+      do {
+        let urls = try result.get()
+        importAttachments(count: urls.count) { index in
+          try await AssistantAttachmentImporter.file(urls[index], repository: store.repository)
+        }
+      } catch {
+        if (error as? CocoaError)?.code != .userCancelled { issue = error.localizedDescription }
+      }
+    }
+    .onChange(of: selectedPhotos) { _, items in
+      guard !items.isEmpty else { return }
+      importAttachments(count: items.count) { index in
+        guard let data = try await items[index].loadTransferable(type: Data.self) else {
+          throw ContentError.invalid("这张照片未能读取，请重新选择。")
+        }
+        return try await AssistantAttachmentImporter.photo(data, repository: store.repository)
+      }
+      selectedPhotos = []
+    }
+    .task {
+      messages = []
+      var session = store.assistantSessionContext
+      session.bookID = bookID
+      session.chapterID = chapterID
+      session.courseID = note?.anchor?.courseID ?? store.sourceTarget?.courseID
+        ?? (store.currentCourse?.resourceIDs.contains(bookID) == true ? store.selectedCourseID : nil)
+      var context = store.agent.frozenContext(session: session)
+      context.page = page
+      context.selection = pageText
+      context.currentNoteID = note?.id
+      frozenContext = context
+    }
+      .onChange(of: store.agent.active) { _, run in
+        if let run, run.context.sessionID == temporarySessionID {
+          contextTokens = run.contextTokens ?? contextTokens
+          if contextTokens >= 900_000 { capacityLocked = true }
+          if contextTokens >= 1_000_000 || (capacityLocked && run.status.isTerminal) {
+            showingCapacityAlert = true
+          }
+        }
+      }
+      .alert("此对话已达到上下文上限", isPresented: $showingCapacityAlert) {
+        Button("新建对话") {
+          store.agent.closeEphemeral()
+          messages = []
+          temporarySessionID = UUID().uuidString
+          contextTokens = 0
+          capacityLocked = false
+        }
+      }
+      .onDisappear {
+        request?.cancel()
+        importTask?.cancel()
+        store.agent.closeEphemeral()
+        messages = []
+        let preserved = Set(store.notes.flatMap { $0.references ?? [] }.compactMap(\.attachmentPath))
+        for attachment in temporaryAttachments {
+          for path in [attachment.path, attachment.thumbnailPath, attachment.textPath].compactMap({ $0 }) where !preserved.contains(path) {
+            try? FileManager.default.removeItem(at: store.attachmentURL(path))
+          }
+        }
+        temporaryAttachments = []
+      }
+  }
+  @ViewBuilder private func bubble(_ text: String, user: Bool, pending: Bool = false) -> some View {
+    if user {
+      HStack(alignment: .top, spacing: 0) {
+        Spacer(minLength: 44)
+        AssistantChatText(text, user: true).appFont(.body).foregroundStyle(.white)
+          .textSelection(.enabled).padding(16)
+          .modifier(AssistantMessageSurface(user: true))
+      }
+    } else {
+      AssistantReplyBubble(run: nil, hasAnswer: !pending) { EmptyView() } answer: {
+        AssistantChatText(text, user: false).appFont(.body).foregroundStyle(DS.text)
+          .textSelection(.enabled)
+      }
+    }
+  }
+  private func importAttachments(count: Int, load: @escaping (Int) async throws -> AssistantAttachment) {
+    guard !addingAttachments, !loading, !capacityLocked else { return }
+    let available = AssistantAttachment.maximumCount - pendingAttachments.count
+    guard count <= available else {
+      issue = "每次最多添加 \(AssistantAttachment.maximumCount) 个附件。"
+      return
+    }
+    addingAttachments = true
+    issue = nil
+    importTask = Task { @MainActor in
+      defer { addingAttachments = false }
+      do {
+        for index in 0..<count {
+          try Task.checkCancellation()
+          let attachment = try await load(index)
+          temporaryAttachments.append(attachment)
+          pendingAttachments.append(attachment)
+        }
+      } catch is CancellationError { }
+      catch { issue = error.localizedDescription }
+    }
+  }
+  private func ask(_ raw: String) {
+    let draft = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard (!draft.isEmpty || !pendingAttachments.isEmpty), !loading, !addingAttachments, !capacityLocked else { return }
+    let input = draft.isEmpty ? "请结合当前教材分析这些附件。" : draft
+    let submittedAttachments = pendingAttachments
+    guard input.unicodeScalars.count <= 2000 else {
+      issue = "问题最多 2000 字，请缩短问题后再提问；批注和页内文字会单独提供。"
+      return
+    }
+    loading = true
+    issue = nil
+    failedQuestion = nil
+    keyboardDismissalID += 1
+    voice.returnToText()
+    let history = messages
+    let epoch = store.cloudState.epoch
+    request = Task { @MainActor in
+      do {
+        try Task.checkCancellation()
+        if voice.draft.trimmingCharacters(in: .whitespacesAndNewlines) == draft { voice.draft = "" }
+        pendingAttachments = []
+        messages.append(ChatMessage(role: "user", text: input, attachments: submittedAttachments))
+        guard let frozenContext, !capacityLocked else { throw ContentError.invalid("此对话已达到上下文上限，请重新打开批注对话。") }
+        if regionAttachment == nil, let image = referenceImage, let bytes = image.pngData() {
+          let attachment = try await AssistantAttachmentImporter.photo(bytes, repository: store.repository)
+          try Task.checkCancellation()
+          regionAttachment = attachment
+          temporaryAttachments.append(attachment)
+        }
+        let result = try await store.agent.answerUnified(sessionID: temporarySessionID,
+          messageID: messages.last?.id ?? UUID().uuidString, request: input,
+          context: frozenContext, history: history,
+          attachments: [regionAttachment].compactMap { $0 } + submittedAttachments, ephemeral: true)
+        try Task.checkCancellation()
+        guard epoch == store.cloudState.epoch else { throw CancellationError() }
+        contextTokens = result.contextTokens ?? contextTokens
+        capacityLocked = capacityLocked || contextTokens >= 900_000
+        messages.append(ChatMessage(role: "assistant", text: result.text, citations: result.citations,
+          sourceLabel: result.sourceLabel))
+      } catch {
+        if !Task.isCancelled {
+          issue = error.localizedDescription
+          failedQuestion = input
+        }
+      }
+      loading = false
+    }
+  }
+}
