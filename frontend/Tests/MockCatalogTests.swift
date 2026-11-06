@@ -37,11 +37,12 @@ private final class MockCatalogNetworkTrap: URLProtocol, @unchecked Sendable {
         XCTAssertTrue(source.flashcards.contains { $0.chapter_id == chapter.id && !$0.back.isEmpty })
         let questions = source.quizzes.filter { $0.chapter_id == chapter.id }
         XCTAssertEqual(Set(questions.compactMap(\.question_type)), ["judgment", "choice", "short-answer"])
-        XCTAssertTrue(questions.allSatisfy { !$0.answer.isEmpty && $0.source_kind == "ai_supplement" })
+        XCTAssertTrue(questions.allSatisfy { !$0.answer.isEmpty && $0.source_kind == "mock_authored" })
         XCTAssertTrue(source.plan.tasks.contains { $0.chapter_id == chapter.id && $0.task_type == "learn" })
       }
-      XCTAssertTrue(source.lessons.allSatisfy { $0.blocks.allSatisfy { $0.citations.isEmpty } },
-        "Preset generic examples must not impersonate textbook citations")
+      XCTAssertTrue(source.lessons.allSatisfy { $0.blocks.allSatisfy { block in
+        block.citations.allSatisfy { $0.source_metadata?["source_kind"] == .string("mock_handout") }
+      } }, "Authored examples must identify their local handout source")
       XCTAssertEqual(MockCatalogService.source(from: source), source, "Opening or importing again keeps progress and content")
     }
     XCTAssertEqual(MockCatalogNetworkTrap.count, 0)

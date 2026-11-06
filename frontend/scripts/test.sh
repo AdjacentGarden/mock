@@ -43,6 +43,7 @@ if [[ -n "$result" ]]; then
   options+=(-resultBundlePath "$result")
 fi
 python3 "$BOOKCOURSE_ROOT/scripts/validate-content.py"
+python3 "$BOOKCOURSE_ROOT/scripts/validate-mock-books.py"
 exec xcodebuild -project "$BOOKCOURSE_ROOT/BookCourse.xcodeproj" -scheme BookCourse \
   -configuration "$BOOKCOURSE_CONFIGURATION" -destination "$destination" \
   -derivedDataPath "$BOOKCOURSE_DERIVED_DATA" -clonedSourcePackagesDirPath "$BOOKCOURSE_PACKAGES" \

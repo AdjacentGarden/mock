@@ -249,7 +249,7 @@ import UIKit
     try await MockDelay.wait()
     let refreshed = try ContentBundle.load([CommunityBook].self, name: "community")
     try Task.checkCancellation()
-    community = refreshed
+    community = MockCatalogService.listings(from: refreshed)
   }
 
   func boot() async {
@@ -265,14 +265,12 @@ import UIKit
       sources = try await repository.loadSources()
       if MockEnvironment.enabled {
         for i in sources.indices {
-          if sources[i].lessons.isEmpty, sources[i].summary.status == "ready" {
-            sources[i] = MockCatalogService.source(from: sources[i])
-          }
+          sources[i] = MockCatalogService.source(from: sources[i])
           for j in sources[i].lessons.indices { sources[i].lessons[j].status = "ready"; sources[i].lessons[j].warnings = [] }
         }
       }
       community = repository.includesFixtureContent
-        ? try ContentBundle.load([CommunityBook].self, name: "community") : []
+        ? MockCatalogService.listings(from: try ContentBundle.load([CommunityBook].self, name: "community")) : []
       filePaths = try await repository.filePaths()
       shelf = sources.filter { sourceFileURL($0.id) != nil }.map {
         ShelfBook(bookId: $0.id, title: $0.summary.title,
@@ -853,6 +851,8 @@ import UIKit
       "community_high_school_chemistry_2": "catalog_chemistry_required_2",
       "community_high_school_english_3": "catalog_english_required_3",
       "community_higher_mathematics": "catalog_advanced_mathematics_1",
+      "community_theoretical_mechanics": "catalog_theoretical_mechanics_1",
+      "community_micro_psychology": "catalog_micro_psychology_set",
     ]
     var source: SourceContent
     if let mapped = mapping[book.id], let existing = sources.first(where: { $0.id == mapped }) {

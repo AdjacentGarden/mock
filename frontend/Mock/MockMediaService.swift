@@ -34,7 +34,8 @@ import Foundation
   let artifactRoot: URL
 
   private var historyURL: URL {
-    let scope = [request.courseID, request.bookID, request.kind].joined(separator: "|")
+    let fixtureScope = MockBookContent.contentBookID(bookID: request.bookID, chapterID: request.chapterID) == nil ? "biology-v1" : "catalog-v2"
+    let scope = [request.courseID, request.bookID, request.kind, fixtureScope].joined(separator: "|")
     let key = SHA256.hash(data: Data(scope.utf8)).map { String(format: "%02x", $0) }.joined()
     return metadataRoot.appendingPathComponent(key + ".json")
   }
@@ -66,7 +67,14 @@ import Foundation
   }
 
   func complete(_ pending: StudioJob) throws -> StudioJob {
-    let path = request.kind == "image" ? imageFixture : "assets/lesson/meiosis-explainer-demo-v1.mp4"
+    let topic = MockBookContent.topic(bookID: request.bookID, chapterID: request.chapterID)
+    let contentBook = MockBookContent.contentBookID(bookID: request.bookID, chapterID: request.chapterID)
+    let path: String
+    if let topic, let contentBook {
+      path = MockBookContent.mediaPath(bookID: contentBook, chapterID: topic.chapter_id, kind: request.kind)
+    } else {
+      path = request.kind == "image" ? imageFixture : "assets/lesson/meiosis-explainer-demo-v1.mp4"
+    }
     guard let source = ContentBundle.url(path), let target = artifactURL(pending) else {
       throw ContentError.missing("本地图解或视频素材")
     }
@@ -80,10 +88,11 @@ import Foundation
     var completed = pending
     completed.status = "succeeded"
     completed.error = nil
-    completed.result = ["title": .string(request.kind == "image" ? "章节辅助图解" : "减数分裂讲解短片"),
-      "explanation": .string(request.kind == "image"
+    completed.result = ["title": .string(request.kind == "image" ? request.chapterTitle + " · 辅助图解" : request.chapterTitle + " · 讲解短片"),
+      "explanation": .string(topic?.summary ?? (request.kind == "image"
         ? "演示图解已准备好。结合课程内容观察概念之间的联系，再完成章节练习。"
-        : "观看示例短片，了解染色体复制与细胞两次分裂的过程。"),
+        : "观看示例短片，了解染色体复制与细胞两次分裂的过程。")),
+      "fixture_version": .string(topic == nil ? "1" : "2"),
       "source": .string("bundled-mock")]
     try save(completed)
     return completed

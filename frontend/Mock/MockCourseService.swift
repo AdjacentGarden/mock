@@ -10,10 +10,26 @@ enum MockCourseService {
   ]
 
   static func preparedSource(from original: SourceContent, includeLearning: Bool = false) throws -> SourceContent {
-    let presets = try ContentBundle.load([SourceContent].self, name: "sources")
-    guard var result = presets.first(where: { !$0.lessons.isEmpty }) else {
+    let presets = try ContentBundle.load([SourceContent].self, name: "sources") + MockBookContent.extraSources
+    let title = original.summary.title.lowercased()
+    let matches: [(String, [String])] = [
+      ("catalog_micro_psychology_set", ["心理", "表情", "psychology"]),
+      ("catalog_theoretical_mechanics_1", ["理论力学", "mechanics"]),
+      ("community_ecology", ["生态", "ecology"]),
+      ("community_motion", ["力与运动", "运动实验"]),
+      ("community_functions", ["函数与导数", "functions"]),
+      ("catalog_advanced_mathematics_1", ["高等数学", "微积分", "calculus"]),
+      ("catalog_high_school_math_required_2", ["数学", "math"]),
+      ("catalog_physics_required_3", ["物理", "physics"]),
+      ("catalog_chemistry_required_2", ["化学", "chemistry"]),
+      ("catalog_english_required_3", ["英语", "english"]),
+    ]
+    let templateID = MockBookContent.book(original.id) != nil ? original.id
+      : matches.first { $0.1.contains(where: title.contains) }?.0 ?? "book_biology_2"
+    guard let preset = presets.first(where: { $0.id == templateID }) else {
       throw ContentError.missing("mock 学习内容")
     }
+    var result = MockCatalogService.source(from: preset)
     // Book ownership changes; chapter/lesson IDs stay stable within each book as in the real API.
     result.summary.book_id = original.id
     result.summary.title = original.summary.title

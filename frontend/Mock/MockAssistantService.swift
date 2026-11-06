@@ -6,9 +6,27 @@ enum MockAssistantService {
   static let organizedNote = "减数分裂要点\n\n1. 染色体在分裂前复制一次。\n2. 第一次分裂分离同源染色体，第二次分裂分离姐妹染色单体。\n3. 结果是形成染色体数目减半的生殖细胞。\n\n自测：为什么不能把两次分裂理解成两次复制？"
 
   static func answer(question: String, title: String, selection: String = "",
-    attachments: Int = 0) async throws -> AssistantAnswer {
+    attachments: Int = 0, bookID: String = "", chapterID: String? = nil) async throws -> AssistantAnswer {
     try await Task.sleep(for: .milliseconds(900))
     try Task.checkCancellation()
+    if let topic = MockBookContent.topic(bookID: bookID, chapterID: chapterID),
+      !question.contains("你好"), question.lowercased() != "hi" {
+      let text: String
+      if question.contains("计划") || question.contains("安排") {
+        text = "本节可以安排 25 分钟：先用 12 分钟理解“\(topic.key_concepts.first ?? title)”，再用 8 分钟做判断、选择与简答练习，最后用 5 分钟回忆六张闪卡。"
+      } else if ["出题", "一道题", "练习"].contains(where: question.contains), let quiz = topic.quizzes.first(where: { $0.question_type == "choice" }) {
+        text = quiz.prompt + "\n\n" + quiz.choices.enumerated().map { "\(Array("ABCD")[$0.offset]). \($0.element)" }.joined(separator: "\n")
+          + "\n\n参考答案：" + quiz.answer + "\n" + quiz.explanation
+      } else if ["比较", "区别", "易错"].contains(where: question.contains) {
+        text = topic.blocks.first { $0.block_type == "comparison" }?.content ?? topic.summary
+      } else if !selection.isEmpty {
+        text = "这段内容与“\(topic.key_concepts.first ?? title)”有关。\n\n" + topic.summary + "\n\n"
+          + (topic.blocks.first { $0.block_type == "application" }?.content ?? "")
+      } else {
+        text = topic.summary + "\n\n" + (topic.blocks.first { $0.block_type == "explanation" }?.content ?? "")
+      }
+      return AssistantAnswer(answer: text, citations: [], sourceLabel: "mock")
+    }
     let text: String
     if question.contains("你好") || question.lowercased() == "hi" {
       text = "你好！我们可以一起梳理知识点、做一道练习，或安排今天的学习。"
@@ -59,26 +77,28 @@ enum MockAssistantService {
     }
   }
 
-  static func photo(bookID: String, imageHash: String,
+  static func photo(bookID: String, chapterID: String? = nil, imageHash: String,
     onProgress: @MainActor @Sendable (String) -> Void) async throws -> StudioJob {
     await onProgress("transcribing")
     try await Task.sleep(for: .milliseconds(650))
     await onProgress("organizing")
     try await Task.sleep(for: .milliseconds(850))
     try Task.checkCancellation()
+    let topic = MockBookContent.topic(bookID: bookID, chapterID: chapterID)
     return StudioJob(id: "mock-photo-" + UUID().uuidString, book_id: bookID,
       kind: "photo_note", status: "succeeded", result: [
-        "title": .string("减数分裂 · 示例笔记"), "transcript": .string(transcript),
-        "polished": .string(organizedNote), "image_sha256": .string(imageHash), "uncertain": .array([]),
+        "title": .string((topic?.key_concepts.first ?? "减数分裂") + " · 示例笔记"),
+        "transcript": .string(topic?.summary ?? transcript),
+        "polished": .string(MockBookContent.note(bookID: bookID, chapterID: chapterID) ?? organizedNote), "image_sha256": .string(imageHash), "uncertain": .array([]),
       ])
   }
 
-  static func voice(onProgress: @MainActor @Sendable (String) -> Void) async throws -> String {
+  static func voice(bookID: String = "", chapterID: String? = nil, onProgress: @MainActor @Sendable (String) -> Void) async throws -> String {
     await onProgress("transcribing")
     try await Task.sleep(for: .milliseconds(700))
     await onProgress("organizing")
     try await Task.sleep(for: .milliseconds(800))
     try Task.checkCancellation()
-    return organizedNote
+    return MockBookContent.note(bookID: bookID, chapterID: chapterID) ?? organizedNote
   }
 }

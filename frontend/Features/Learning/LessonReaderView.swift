@@ -871,9 +871,13 @@ struct LessonReaderView: View {
       VStack(alignment: .leading, spacing: 4) {
         Text(lesson.title).font(DS.font(.sectionTitle)).frame(minHeight: 32, alignment: .leading)
         Text(
-          "\(store.selectedBookID == "book_biology_2" ? "人教版高中生物必修二遗传与进化" : store.currentSource?.summary.title ?? store.currentTitle) · 原书\(learningPageLabel(lesson.page_start, end: lesson.page_end, printed: chapter?.printed_page_start, printedEnd: chapter?.printed_page_end).replacingOccurrences(of: "教材", with: ""))"
+          "\(store.selectedBookID == "book_biology_2" ? "人教版高中生物必修二遗传与进化" : store.currentSource?.summary.title ?? store.currentTitle) · \(MockBookContent.book(lesson.book_id) == nil ? "原书" : "目录定位")\(learningPageLabel(lesson.page_start, end: lesson.page_end, printed: chapter?.printed_page_start, printedEnd: chapter?.printed_page_end).replacingOccurrences(of: "教材", with: ""))"
         )
         .font(DS.font(.supporting)).foregroundStyle(DS.secondary).frame(minHeight: 20)
+        if MockBookContent.book(lesson.book_id) != nil {
+          Text("原创预置课程 · 引用可查看本地示例讲义")
+            .font(DS.font(.supporting)).foregroundStyle(DS.primary)
+        }
       }.padding(.bottom, 15).overlay(alignment: .bottom) {
         Rectangle().fill(DS.border).frame(height: 1)
       }
@@ -1001,7 +1005,7 @@ struct LessonReaderView: View {
       Button {
         store.openCitation(citation)
       } label: {
-        Label("查看原文", systemImage: "book").font(DS.font(.smallButton)).foregroundStyle(
+        Label(MockBookContent.book(lesson?.book_id ?? "") == nil ? "查看原文" : "查看示例讲义", systemImage: "book").font(DS.font(.smallButton)).foregroundStyle(
           DS.primary)
       }.buttonStyle(.plain).buttonFrame()
         .accessibilityLabel(

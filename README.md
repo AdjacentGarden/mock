@@ -2,7 +2,7 @@
 
 本仓库基于主项目前端提交 `1028abd9384543c280f802ebb8a7eb298e447272` 构建，是 [LLM_Study_App](https://github.com/AdjacentGarden/LLM_Study_App) 的独立 mock 客户端，沿用其当前的 **SwiftUI iPhone / iPad 前端**，最低支持 iOS 17。它用于演示和前端联调，不需要启动后端、配置账号服务、OCR 服务或模型密钥。
 
-用户选择的 PDF 只保存在 App 本机目录。上传、解析、预处理、课程生成、问题回答、图片与视频生成全部由前端 mock 服务完成；课程内容来自内置演示数据，不分析上传 PDF 的正文。不同 PDF 会保留各自的文件名、课程与学习记录，但生成的学习主题使用固定样例。
+用户选择的 PDF 只保存在 App 本机目录。上传、解析、预处理、课程生成、问题回答、图片与视频生成全部由前端 mock 服务完成；课程内容来自内置演示数据，不分析上传 PDF 的正文。不同 PDF 会保留各自的文件名、课程与学习记录；前端根据文件名选择对应学科的预置课程，不识别 PDF 正文。无法判断学科时使用生物演示课程。
 
 ## 运行
 
@@ -32,6 +32,42 @@ xcrun simctl list devices available
 
 「发现」和「我的」保留内置演示内容。账号、云端同步和生成结果均为本地模拟；页面中的教材引用属于演示课程，不代表从用户上传的 PDF 中提取。
 
+## 完整课程内容
+
+其余书籍和专题课采用与生物课程一致的教学结构。每节包含导读、四段图文讲解（概念、图解、辨析、应用）、六张闪卡、判断/选择/简答各一道题、学习/练习/复习计划，以及本节专属图解、6 秒本地短片和可打开的示例讲义。
+
+| 书籍或专题课 | 课时 | 闪卡 | 练习 |
+| --- | ---: | ---: | ---: |
+| 数学 必修第二册 | 43 | 258 | 129 |
+| 物理 必修第三册 | 25 | 150 | 75 |
+| 化学 必修第二册 | 26 | 156 | 78 |
+| 英语 必修第三册 | 50 | 300 | 150 |
+| 高等数学 上册 | 51 | 306 | 153 |
+| 理论力学 I | 7 | 42 | 21 |
+| 微表情·微动作·微反应套装 | 9 | 54 | 27 |
+| 生态系统与稳态 | 3 | 18 | 9 |
+| 力与运动 | 3 | 18 | 9 |
+| 函数与导数 | 3 | 18 | 9 |
+| **合计（不含原生物课程）** | **220** | **1320** | **660** |
+
+原有目录节点保持不变；心理套装按三卷分组提供九节原创 mock 课程。所有内容均为预先编写的演示材料，引用入口打开本地示例讲义，不冒充未提供的教材扫描页。助手、照片/语音笔记与媒体入口使用当前课程的内容，不再借用生物讲解。已有通用占位课程会在启动时升级，学习位置、任务完成状态和闪卡熟悉度保留。
+
+内容位于 `frontend/Resources/Data/MockBooks/`，媒体位于 `frontend/Resources/Content/assets/mock-books/`。修改对应生成脚本后可以重新生成内容和媒体：
+
+```bash
+cd frontend
+python3 scripts/generate-extra-mock-sources.py
+python3 scripts/generate-math-mock.py
+python3 scripts/generate-science-mock.py
+python3 scripts/generate-english-mock.py
+python3 scripts/generate-psychology-mock.py
+# 以下只在维护媒体素材时需要；App 运行不需要 Python 或 FFmpeg。
+python3 -m venv .build/mock-media-env
+.build/mock-media-env/bin/pip install -r scripts/requirements-mock-media.txt
+.build/mock-media-env/bin/python scripts/render-mock-book-media.py
+python3 scripts/validate-mock-books.py
+```
+
 ## Mock 组织
 
 | 位置 | 职责 |
@@ -49,7 +85,7 @@ xcrun simctl list devices available
 
 ## 验证
 
-本次 Debug / Release 构建、19 项集成测试和 4 项 UI 测试已通过，详见 [验收记录](frontend/docs/MOCK_VALIDATION.md)。
+本次全书升级的 Debug / Release 构建和 23 项单元/集成测试已通过，详见 [验收记录](frontend/docs/MOCK_VALIDATION.md)。
 
 ```bash
 cd frontend

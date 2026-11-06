@@ -19,6 +19,6 @@ actor AssistantService {
     sources: [SourceContent], history: [ChatMessage]) async throws -> AssistantAnswer {
     let source = sources.first { $0.id == bookID }
     let title = source?.chapters.first { $0.id == chapterID }?.title ?? source?.summary.title ?? ""
-    return try await MockAssistantService.answer(question: question, title: title)
+    return try await MockAssistantService.answer(question: question, title: title, bookID: bookID, chapterID: chapterID)
   }
 }

@@ -28,6 +28,7 @@ if [[ "$destination" == *Simulator* ]]; then
   options+=(CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=-)
 fi
 python3 "$BOOKCOURSE_ROOT/scripts/validate-content.py"
+python3 "$BOOKCOURSE_ROOT/scripts/validate-mock-books.py"
 exec xcodebuild -project "$BOOKCOURSE_ROOT/BookCourse.xcodeproj" -scheme BookCourse \
   -configuration "$BOOKCOURSE_CONFIGURATION" -destination "$destination" \
   -derivedDataPath "$BOOKCOURSE_DERIVED_DATA" -clonedSourcePackagesDirPath "$BOOKCOURSE_PACKAGES" \

@@ -18,6 +18,9 @@ python3 scripts/generate-project.py
 
 ## 代码位置
 
+- `Resources/Data/MockBooks/`：其余十本书/专题课的 220 节原创课程、1320 张闪卡、660 道练习。
+- `Resources/Content/assets/mock-books/`：每节专属图解、6 秒讲解短片与本地示例讲义。
+- `Mock/MockBookContent.swift`、`MockCatalogService.swift`：统一课程装配与旧占位数据升级。
 - `Mock/`：mock 服务、统一延迟与数据映射。异步步骤通常等待 0.5–2 秒，并支持取消。
 - `Resources/Data/`：预置课程、题目、闪卡、书架、社区、笔记及页面场景。
 - `Resources/Content/`：随 App 打包的图片、封面、教材页和媒体资源。

@@ -365,11 +365,7 @@ actor LocalBookCourseRepository: BookCourseRepository, StudyNoteRepository {
       .appendingPathComponent("BookCourse", isDirectory: true)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     self.directory = root
-    #if DEBUG
-      self.includesFixtureContent = includeFixtures
-    #else
-      self.includesFixtureContent = false
-    #endif
+    self.includesFixtureContent = includeFixtures
     self.db = try SQLiteConnection(url: root.appendingPathComponent("bookcourse.sqlite"))
     self.encoder.outputFormatting = [.sortedKeys]
     try FileManager.default.createDirectory(
@@ -381,7 +377,8 @@ actor LocalBookCourseRepository: BookCourseRepository, StudyNoteRepository {
   }
   func loadSources() throws -> [SourceContent] {
     try retireUnchangedPreviewContent()
-    let seed: [SourceContent] = includesFixtureContent ? try ContentBundle.load([SourceContent].self, name: "sources") : []
+    let seed: [SourceContent] = includesFixtureContent
+      ? try ContentBundle.load([SourceContent].self, name: "sources") + MockBookContent.extraSources : []
     let saved = try db.get("source").map { try decoder.decode(SourceContent.self, from: $0) }
     var sources = seed
     for source in saved {

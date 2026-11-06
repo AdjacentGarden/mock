@@ -127,7 +127,7 @@ enum AssistantInputPhase: Equatable {
     // The demo capture animates locally and transcribes to a fixed editable draft.
     AssistantVoiceInput(capture: AssistantVoicePreviewCapture()) { _ in
       try await Task.sleep(for: .milliseconds(800))
-      return "请解释减数分裂为什么需要两次分裂。"
+      return "请解释当前章节的核心概念，并给我一道对应的练习。"
     }
   }
 

@@ -299,7 +299,7 @@ struct NotesPhotoNoteView: View {
     busy = true; error = nil; phase = "正在识别…"
     task = Task {
       do {
-        let result = try await MockAssistantService.photo(bookID: bookID, imageHash: photo.imageSHA256) { phase in
+        let result = try await MockAssistantService.photo(bookID: bookID, chapterID: saved.anchor?.chapterID, imageHash: photo.imageSHA256) { phase in
           self.phase = phase == "organizing" ? "正在整理示例笔记…" : "正在准备示例文字…"
         }
         try Task.checkCancellation()

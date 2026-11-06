@@ -134,7 +134,8 @@ struct NotesSourceReaderView: View {
     chapter?.printed_page_start.map { $0 + page - (chapter?.page_start ?? page) }
   }
   private var imagePath: String? {
-    NotesPageManifest.assets.first { $0.book_id == bookID && $0.pdf_page == page }?.url
+    MockCatalogService.handoutPath(source: source, page: page)
+      ?? NotesPageManifest.assets.first { $0.book_id == bookID && $0.pdf_page == page }?.url
   }
   private var fileURL: URL? { store.sourceFileURL(bookID) }
   private var pdf: PDFDocument? { cachedPDF }
@@ -171,6 +172,11 @@ struct NotesSourceReaderView: View {
   var body: some View {
     VStack(spacing: 0) {
       header
+      if MockBookContent.book(bookID) != nil {
+        Text("本地示例讲义 · 原创预置内容，非教材扫描原文")
+          .font(DS.font(.supporting)).foregroundStyle(DS.secondary).padding(8)
+          .accessibilityIdentifier("mock.handout.notice")
+      }
       tools
       if let error {
         HStack {
@@ -855,7 +861,7 @@ struct NotesSourceReaderView: View {
           try Task.checkCancellation()
           guard generation == loadGeneration, epoch == store.cloudState.epoch,
             drawingData == original, inkNote?.id == note.id, recognizedText == confirmed else { return }
-          organizedText = MockAssistantService.organizedNote
+          organizedText = MockBookContent.note(bookID: bookID, chapterID: chapter?.id) ?? MockAssistantService.organizedNote
           organizedAccepted = false
           inkPhase = "complete"
           return

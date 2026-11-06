@@ -142,7 +142,8 @@ struct AgentValidationError: Error, Equatable, Sendable, LocalizedError {
     defer { isWorking = false }
     do {
       let answer = try await MockAssistantService.answer(question: request,
-        title: context.bookTitle, selection: context.selection, attachments: attachments.count)
+        title: context.bookTitle, selection: context.selection, attachments: attachments.count,
+        bookID: context.bookID, chapterID: context.chapterID)
       try Task.checkCancellation()
       guard store.noteScope == scope, epoch == store.cloudState.epoch,
         active?.id == run.id, active?.cancelRequested != true,

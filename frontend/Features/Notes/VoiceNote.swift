@@ -743,10 +743,10 @@ struct NotesVoiceNoteView: View {
         guard active, generation == recordingGeneration, epoch == store.cloudState.epoch else { throw CancellationError() }
         if MockEnvironment.enabled {
           usedOnDeviceRecognition = false
-          let result = try await MockAssistantService.voice { next in phase = next }
+          let result = try await MockAssistantService.voice(bookID: note.anchor?.bookID ?? "", chapterID: note.anchor?.chapterID) { next in phase = next }
           guard active, generation == recordingGeneration, epoch == store.cloudState.epoch,
             currentNote?.id == note.id else { throw CancellationError() }
-          note.transcript = MockAssistantService.transcript
+          note.transcript = MockBookContent.topic(bookID: note.anchor?.bookID ?? "", chapterID: note.anchor?.chapterID)?.summary ?? MockAssistantService.transcript
           note.voiceRecognitionSource = "mock"
           note.organizedText = result
           _ = try await store.saveNote(note)

@@ -119,7 +119,7 @@ import XCTest
     input.endHold()
     XCTAssertEqual(input.phase, .transcribing)
     try await waitFor { input.phase == .text }
-    XCTAssertTrue(input.draft.contains("减数分裂"))
+    XCTAssertTrue(input.draft.contains("当前章节"))
     XCTAssertNil(input.error)
     input.returnToText()
   }

@@ -1,0 +1,488 @@
+[
+  {
+    "summary": {
+      "book_id": "catalog_theoretical_mechanics_1",
+      "title": "理论力学 I",
+      "filename": "理论力学 I.pdf",
+      "cover_url": "/assets/community/theoretical-mechanics-1-8e-cover.webp",
+      "status": "ready",
+      "page_count": 7,
+      "chapter_count": 7,
+      "chunk_count": 0,
+      "asset_count": 0,
+      "average_confidence": 100,
+      "updated_at": 1793952000,
+      "content_mode": "mock_outline"
+    },
+    "chapters": [
+      {
+        "chapter_id": "mechanics-c1",
+        "source_title": "第一章 静力学公理和物体的受力分析",
+        "ai_title": "第一章 静力学公理和物体的受力分析",
+        "level": 1,
+        "page_start": 1,
+        "page_end": 1,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": null
+      },
+      {
+        "chapter_id": "mechanics-c2",
+        "source_title": "第二章 平面力系",
+        "ai_title": "第二章 平面力系",
+        "level": 1,
+        "page_start": 2,
+        "page_end": 2,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": null
+      },
+      {
+        "chapter_id": "mechanics-c3",
+        "source_title": "第三章 空间力系",
+        "ai_title": "第三章 空间力系",
+        "level": 1,
+        "page_start": 3,
+        "page_end": 3,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": null
+      },
+      {
+        "chapter_id": "mechanics-c4",
+        "source_title": "第四章 摩擦",
+        "ai_title": "第四章 摩擦",
+        "level": 1,
+        "page_start": 4,
+        "page_end": 4,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": null
+      },
+      {
+        "chapter_id": "mechanics-c5",
+        "source_title": "第五章 点的运动学",
+        "ai_title": "第五章 点的运动学",
+        "level": 1,
+        "page_start": 5,
+        "page_end": 5,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": null
+      },
+      {
+        "chapter_id": "mechanics-c8",
+        "source_title": "第八章 刚体的平面运动",
+        "ai_title": "第八章 刚体的平面运动",
+        "level": 1,
+        "page_start": 6,
+        "page_end": 6,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": null
+      },
+      {
+        "chapter_id": "mechanics-c12",
+        "source_title": "第十二章 动能定理",
+        "ai_title": "第十二章 动能定理",
+        "level": 1,
+        "page_start": 7,
+        "page_end": 7,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": null
+      }
+    ],
+    "lessons": [],
+    "chunks": [],
+    "assets": [],
+    "flashcards": [],
+    "quizzes": [],
+    "plan": {
+      "user_id": "mock_learner",
+      "book_id": "catalog_theoretical_mechanics_1",
+      "days": 7,
+      "daily_minutes": 25,
+      "tasks": []
+    }
+  },
+  {
+    "summary": {
+      "book_id": "community_ecology",
+      "title": "生态系统与稳态",
+      "filename": "生态系统与稳态.pdf",
+      "cover_url": "/assets/textbook/biology-chapter-3-open.webp",
+      "status": "ready",
+      "page_count": 3,
+      "chapter_count": 3,
+      "chunk_count": 0,
+      "asset_count": 0,
+      "average_confidence": 100,
+      "updated_at": 1793952000,
+      "content_mode": "mock_outline"
+    },
+    "chapters": [
+      {
+        "chapter_id": "ecology-1",
+        "source_title": "生态系统结构",
+        "ai_title": "生态系统结构",
+        "level": 1,
+        "page_start": 1,
+        "page_end": 1,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": null
+      },
+      {
+        "chapter_id": "ecology-2",
+        "source_title": "能量流动",
+        "ai_title": "能量流动",
+        "level": 1,
+        "page_start": 2,
+        "page_end": 2,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": null
+      },
+      {
+        "chapter_id": "ecology-3",
+        "source_title": "信息传递",
+        "ai_title": "信息传递",
+        "level": 1,
+        "page_start": 3,
+        "page_end": 3,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": null
+      }
+    ],
+    "lessons": [],
+    "chunks": [],
+    "assets": [],
+    "flashcards": [],
+    "quizzes": [],
+    "plan": {
+      "user_id": "mock_learner",
+      "book_id": "community_ecology",
+      "days": 3,
+      "daily_minutes": 25,
+      "tasks": []
+    }
+  },
+  {
+    "summary": {
+      "book_id": "community_motion",
+      "title": "力与运动",
+      "filename": "力与运动.pdf",
+      "cover_url": "/assets/community/force-motion-cover-v1.webp",
+      "status": "ready",
+      "page_count": 3,
+      "chapter_count": 3,
+      "chunk_count": 0,
+      "asset_count": 0,
+      "average_confidence": 100,
+      "updated_at": 1793952000,
+      "content_mode": "mock_outline"
+    },
+    "chapters": [
+      {
+        "chapter_id": "motion-1",
+        "source_title": "运动的描述",
+        "ai_title": "运动的描述",
+        "level": 1,
+        "page_start": 1,
+        "page_end": 1,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": null
+      },
+      {
+        "chapter_id": "motion-2",
+        "source_title": "相互作用与力",
+        "ai_title": "相互作用与力",
+        "level": 1,
+        "page_start": 2,
+        "page_end": 2,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": null
+      },
+      {
+        "chapter_id": "motion-3",
+        "source_title": "牛顿运动定律",
+        "ai_title": "牛顿运动定律",
+        "level": 1,
+        "page_start": 3,
+        "page_end": 3,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": null
+      }
+    ],
+    "lessons": [],
+    "chunks": [],
+    "assets": [],
+    "flashcards": [],
+    "quizzes": [],
+    "plan": {
+      "user_id": "mock_learner",
+      "book_id": "community_motion",
+      "days": 3,
+      "daily_minutes": 25,
+      "tasks": []
+    }
+  },
+  {
+    "summary": {
+      "book_id": "community_functions",
+      "title": "函数与导数",
+      "filename": "函数与导数.pdf",
+      "cover_url": "/assets/community/functions-derivatives-cover-v1.webp",
+      "status": "ready",
+      "page_count": 3,
+      "chapter_count": 3,
+      "chunk_count": 0,
+      "asset_count": 0,
+      "average_confidence": 100,
+      "updated_at": 1793952000,
+      "content_mode": "mock_outline"
+    },
+    "chapters": [
+      {
+        "chapter_id": "functions-1",
+        "source_title": "函数图像与性质",
+        "ai_title": "函数图像与性质",
+        "level": 1,
+        "page_start": 1,
+        "page_end": 1,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": null
+      },
+      {
+        "chapter_id": "functions-2",
+        "source_title": "导数与单调性",
+        "ai_title": "导数与单调性",
+        "level": 1,
+        "page_start": 2,
+        "page_end": 2,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": null
+      },
+      {
+        "chapter_id": "functions-3",
+        "source_title": "导数的综合应用",
+        "ai_title": "导数的综合应用",
+        "level": 1,
+        "page_start": 3,
+        "page_end": 3,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": null
+      }
+    ],
+    "lessons": [],
+    "chunks": [],
+    "assets": [],
+    "flashcards": [],
+    "quizzes": [],
+    "plan": {
+      "user_id": "mock_learner",
+      "book_id": "community_functions",
+      "days": 3,
+      "daily_minutes": 25,
+      "tasks": []
+    }
+  },
+  {
+    "summary": {
+      "book_id": "catalog_micro_psychology_set",
+      "title": "微表情·微动作·微反应心理学（套装三册）",
+      "filename": "微表情·微动作·微反应心理学（套装三册）.pdf",
+      "cover_url": "/assets/book-covers/micro-psychology-set.webp",
+      "status": "ready",
+      "page_count": 9,
+      "chapter_count": 3,
+      "chunk_count": 0,
+      "asset_count": 0,
+      "average_confidence": 100,
+      "updated_at": 1793952000,
+      "content_mode": "mock_outline"
+    },
+    "chapters": [
+      {
+        "chapter_id": "psychology-c1",
+        "source_title": "表情观察",
+        "ai_title": "表情观察",
+        "level": 1,
+        "page_start": 1,
+        "page_end": 3,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": null
+      },
+      {
+        "chapter_id": "psychology-c1-s1",
+        "source_title": "可观察特征与情绪假设",
+        "ai_title": "可观察特征与情绪假设",
+        "level": 2,
+        "page_start": 1,
+        "page_end": 1,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": "psychology-c1"
+      },
+      {
+        "chapter_id": "psychology-c1-s2",
+        "source_title": "面部动作与情境线索",
+        "ai_title": "面部动作与情境线索",
+        "level": 2,
+        "page_start": 2,
+        "page_end": 2,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": "psychology-c1"
+      },
+      {
+        "chapter_id": "psychology-c1-s3",
+        "source_title": "短暂表情的连续观察",
+        "ai_title": "短暂表情的连续观察",
+        "level": 2,
+        "page_start": 3,
+        "page_end": 3,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": "psychology-c1"
+      },
+      {
+        "chapter_id": "psychology-c2",
+        "source_title": "动作观察",
+        "ai_title": "动作观察",
+        "level": 1,
+        "page_start": 4,
+        "page_end": 6,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": null
+      },
+      {
+        "chapter_id": "psychology-c2-s1",
+        "source_title": "姿态、手势与交流功能",
+        "ai_title": "姿态、手势与交流功能",
+        "level": 2,
+        "page_start": 4,
+        "page_end": 4,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": "psychology-c2"
+      },
+      {
+        "chapter_id": "psychology-c2-s2",
+        "source_title": "个体基线与行为变化",
+        "ai_title": "个体基线与行为变化",
+        "level": 2,
+        "page_start": 5,
+        "page_end": 5,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": "psychology-c2"
+      },
+      {
+        "chapter_id": "psychology-c2-s3",
+        "source_title": "空间距离与互动节奏",
+        "ai_title": "空间距离与互动节奏",
+        "level": 2,
+        "page_start": 6,
+        "page_end": 6,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": "psychology-c2"
+      },
+      {
+        "chapter_id": "psychology-c3",
+        "source_title": "反应与沟通",
+        "ai_title": "反应与沟通",
+        "level": 1,
+        "page_start": 7,
+        "page_end": 9,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": null
+      },
+      {
+        "chapter_id": "psychology-c3-s1",
+        "source_title": "反应时序与问题情境",
+        "ai_title": "反应时序与问题情境",
+        "level": 2,
+        "page_start": 7,
+        "page_end": 7,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": "psychology-c3"
+      },
+      {
+        "chapter_id": "psychology-c3-s2",
+        "source_title": "多种线索的交叉核对",
+        "ai_title": "多种线索的交叉核对",
+        "level": 2,
+        "page_start": 8,
+        "page_end": 8,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": "psychology-c3"
+      },
+      {
+        "chapter_id": "psychology-c3-s3",
+        "source_title": "观察记录与澄清提问",
+        "ai_title": "观察记录与澄清提问",
+        "level": 2,
+        "page_start": 9,
+        "page_end": 9,
+        "confidence": 100,
+        "status": "confirmed",
+        "source": "authored-mock-outline",
+        "parent_id": "psychology-c3"
+      }
+    ],
+    "lessons": [],
+    "chunks": [],
+    "assets": [],
+    "flashcards": [],
+    "quizzes": [],
+    "plan": {
+      "user_id": "mock_learner",
+      "book_id": "catalog_micro_psychology_set",
+      "days": 12,
+      "daily_minutes": 25,
+      "tasks": []
+    }
+  }
+]
