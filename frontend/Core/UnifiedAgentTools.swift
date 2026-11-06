@@ -13,7 +13,8 @@ import ZIPFoundation
     "update_study_plan", "remove_course", "ask_user"]
 
   static func label(_ name: String) -> String {
-    ["save_note": "保存笔记", "open_note": "打开笔记", "ask_user": "询问你的选择", "list_courses": "查看已保存课程", "read_course_catalog": "读取课程目录", "search_discovery": "检索发现页课程",
+    ["create_note": "建立笔记", "update_note": "修改笔记", "list_notes": "查看笔记列表", "read_note": "读取笔记", "read_current_lesson": "读取当前学习内容",
+     "save_note": "保存笔记", "open_note": "打开笔记", "ask_user": "询问你的选择", "list_courses": "查看已保存课程", "read_course_catalog": "读取课程目录", "search_discovery": "检索发现页课程",
      "acquire_course": "获取课程", "read_material": "读取课程资料", "search_learning_materials": "跨教材检索原文", "read_attachment": "读取本会话附件",
      "read_learning_data": "读取学习记录", "navigate": "打开目标页面", "capture_screen": "查看当前界面",
      "edit_note": "更新笔记", "delete_note": "删除笔记", "create_flashcards": "创建闪卡",

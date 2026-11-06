@@ -5,7 +5,7 @@ import UIKit
 
 /// All content is copied into the native bundle. No source-repository path is used at runtime.
 enum ContentBundle {
-  /// Fixed data is opt-in for Debug UI tests; Release always uses real storage/services.
+  /// Debug UI tests opt in to fixed assistant replies and a separate local data directory.
   static var fixtureMode: Bool {
     #if DEBUG
       ProcessInfo.processInfo.arguments.contains("--fixture")

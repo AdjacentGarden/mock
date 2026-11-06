@@ -3,3 +3,5 @@
 *.xcresult/
 .env
 .env.*
+.deepseek-setup.json
+.enable-deepseek-live-tests

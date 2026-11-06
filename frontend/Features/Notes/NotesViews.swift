@@ -51,6 +51,7 @@ extension NoteProvenance {
     case "textbook": "来源：教材原文"
     case "general": "来源：一般知识（非教材引用）"
     case "mixed": "来源：教材原文 + 一般知识"
+    case "deepseek": "DeepSeek Flash · AI 整理"
     default: "来源：\(sourceLabel)"
     }
   }

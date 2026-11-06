@@ -1321,7 +1321,7 @@ import UIKit
   }
   func ask(_ question: String) async {
     guard !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-    guard cloud != nil, processingPolicy.path.kind != .offline else {
+    guard MockEnvironment.enabled || (cloud != nil && processingPolicy.path.kind != .offline) else {
       showToast("AI 助手需要联网", kind: .warning); return
     }
     let snapshot = assistantSessionContext

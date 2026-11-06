@@ -501,6 +501,7 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
   var sourceLabelText: String? {
     switch sourceLabel {
     case "mock": return "来源：本地演示数据"
+    case "deepseek": return "DeepSeek Flash · AI 生成"
     case "textbook": return "来源：教材原文"
     case "learning_records": return "来源：课程目录与学习记录"
     case "public_catalog": return "来源：发现中的公开课程目录"

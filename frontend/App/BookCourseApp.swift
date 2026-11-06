@@ -7,6 +7,7 @@ import UIKit
   private var startupError: String?
   init() {
     MockNetworkGuard.install()
+    try? LiveAssistantConfiguration.importLocalBootstrapIfPresent()
     ContentBundle.registerFonts()
     do {
       let args = ProcessInfo.processInfo.arguments

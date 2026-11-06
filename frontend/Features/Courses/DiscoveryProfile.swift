@@ -561,6 +561,7 @@ struct LearnerSettingsView: View {
   @Environment(AppStore.self) private var store
   @State private var confirmingLogout = false
   @State private var showingArchive = false
+  @State private var showingAISettings = false
   var body: some View {
     CourseFeaturePage(width: 640, useSourceLayoutTop: true) {
       SettingsSourceCard {
@@ -598,6 +599,23 @@ struct LearnerSettingsView: View {
           }
         }
       }
+      Button {
+        showingAISettings = true
+      } label: {
+        SettingsSourceCard {
+          HStack(spacing: 12) {
+            Image(systemName: "sparkles").foregroundStyle(DS.primary)
+            VStack(alignment: .leading, spacing: 4) {
+              Text("AI模型与工具").font(DS.font(.cardTitle)).foregroundStyle(DS.text)
+              Text("DeepSeek Flash · 密钥与连接").font(DS.font(.supporting))
+                .foregroundStyle(DS.secondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right").foregroundStyle(DS.secondary)
+          }.frame(minHeight: 44)
+        }
+      }.buttonStyle(.plain).accessibilityLabel("AI模型与工具")
+        .accessibilityIdentifier("settings.ai")
       VStack(spacing: 8) {
         Button {
           confirmingLogout = true
@@ -637,6 +655,8 @@ struct LearnerSettingsView: View {
           }
         }
       }
+    }.sheet(isPresented: $showingAISettings) {
+      DeepSeekSettingsView()
     }.sheet(isPresented: $showingArchive) {
       if let scope = store.noteScope { LegacyLearningArchiveView(scope: scope).id(scope) }
     }.overlay {

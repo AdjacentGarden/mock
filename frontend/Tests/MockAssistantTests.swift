@@ -6,6 +6,7 @@ import XCTest
   private func makeStore() async throws -> (AppStore, URL) {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent("mock-assistant-" + UUID().uuidString)
     let store = AppStore(repository: try LocalBookCourseRepository(directory: folder, includeFixtures: true), cloud: nil)
+    store.agent.forceMockForTesting = true
     await store.boot()
     XCTAssertNil(store.bootError)
     XCTAssertNil(store.cloud)

@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-/// This repository always runs locally, including Release and configured launch environments.
+/// Business flows stay local in every build. The live assistant is configured separately.
 enum MockEnvironment {
   static let enabled = true
 }

@@ -643,6 +643,7 @@ struct LearningPlanView: View {
             }
           }
         }
+        if store.cloud == nil { LocalAgentReviewTasksView() }
         ViewThatFits(in: .horizontal) {
           calendarGrid(columns: 7).frame(minWidth: 334, idealWidth: 334)
           calendarGrid(columns: 4)
@@ -741,6 +742,137 @@ struct LearningPlanView: View {
       store.openLesson(lesson)
     } else {
       store.go(.lesson)
+    }
+  }
+}
+
+private struct LocalAgentReviewTasksView: View {
+  @Environment(AppStore.self) private var store
+  @State private var selectedDate = Date.now
+  @State private var completingIDs: Set<String> = []
+  @State private var issue: String?
+  private var day: String { DailyStudyPlanState.day(selectedDate) }
+  private var tasks: [CloudStudyPlanTask] { store.localAgentReviewTasks(day: day) }
+  private var hasReviews: Bool {
+    store.assistantState.learningObjects.contains { $0.kind == "review_task" && $0.course_id == store.selectedCourseID }
+  }
+
+  var body: some View {
+    if hasReviews {
+      BCCard {
+        VStack(alignment: .leading, spacing: 12) {
+          Text("AI 安排的复习").font(DS.font(.sectionTitle))
+          DatePicker("复习日期", selection: $selectedDate, displayedComponents: .date)
+            .datePickerStyle(.compact).font(DS.font(.body))
+            .accessibilityIdentifier("plan.agent.date")
+          if tasks.isEmpty {
+            Text("这一天没有 AI 安排的复习任务。")
+              .font(DS.font(.supporting)).foregroundStyle(DS.secondary)
+          }
+          ForEach(tasks) { task in
+            VStack(alignment: .leading, spacing: 8) {
+              HStack {
+                Text(task.title).font(DS.font(.cardTitle))
+                Spacer(minLength: 8)
+                if task.isDone { Image(systemName: "checkmark.circle.fill").foregroundStyle(DS.primary) }
+              }
+              Text("\(task.minutes) 分钟 · \(task.isDone ? "已完成" : "待复习")")
+                .font(DS.font(.supporting)).foregroundStyle(DS.secondary)
+              if let description = store.assistantState.learningObjects.first(where: { $0.id == task.id })?.data["description"]?.stringValue {
+                Text(description).font(DS.font(.body))
+              }
+              HStack(spacing: 12) {
+                Button("开始复习") {
+                  do { try store.openLocalAgentReviewTask(task, day: day) }
+                  catch { issue = error.localizedDescription }
+                }.buttonStyle(.plain).font(DS.font(.smallButton)).foregroundStyle(DS.primary)
+                  .buttonFrame().accessibilityIdentifier("plan.agent.open.\(task.id)")
+                Button(task.isDone ? "已完成" : "标记完成") { complete(task) }
+                  .buttonStyle(.plain).font(DS.font(.smallButton)).foregroundStyle(DS.primary)
+                  .buttonFrame().disabled(task.isDone || completingIDs.contains(task.id))
+                  .accessibilityIdentifier("plan.agent.complete.\(task.id)")
+              }
+            }
+            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+            .background(DS.background, in: RoundedRectangle(cornerRadius: 12))
+            .accessibilityIdentifier("plan.agent.task.\(task.id)")
+          }
+          if let issue { Text(issue).font(DS.font(.supporting)).foregroundStyle(DS.danger) }
+        }
+      }.accessibilityIdentifier("plan.agent.reviews")
+    }
+  }
+
+  private func complete(_ task: CloudStudyPlanTask) {
+    guard !completingIDs.contains(task.id) else { return }
+    let submittedDay = day
+    completingIDs.insert(task.id)
+    issue = nil
+    Task { @MainActor in
+      defer { completingIDs.remove(task.id) }
+      do { try await store.completeLocalAgentReviewTask(task, day: submittedDay) }
+      catch { issue = error.localizedDescription }
+    }
+  }
+}
+
+extension AppStore {
+  func localAgentReviewTasks(day: String) -> [CloudStudyPlanTask] {
+    guard cloud == nil, let courseID = selectedCourseID else { return [] }
+    let ids = Set(assistantState.learningObjects.filter {
+      $0.kind == "review_task" && $0.course_id == courseID
+    }.map(\.id))
+    return agentPlanTasks(courseID: courseID, date: day).filter { ids.contains($0.id) }
+  }
+
+  func openLocalAgentReviewTask(_ task: CloudStudyPlanTask, day: String) throws {
+    guard cloud == nil, let course = currentCourse, course.resourceIDs.contains(task.book_id),
+      localAgentReviewTasks(day: day).contains(where: { $0.id == task.id }),
+      courseResourceID(courseID: course.id, bookID: task.book_id) == task.resource_id,
+      sources.contains(where: { $0.id == task.book_id }) else {
+      throw ContentError.invalid("这项复习的课程资料暂不可用，请重新打开学习计划。")
+    }
+    selectSource(task.book_id)
+    selectedChapterID = task.chapter_id
+    learningState.agentFocusCardID = task.card_id
+    if !flashcards.filter({ task.card_id == nil || $0.id == task.card_id }).isEmpty {
+      go(.flashcards)
+    } else if let lesson = lessons.first(where: { task.lesson_id == $0.id }) {
+      openLesson(lesson)
+    } else if let lesson = lessons.first(where: { task.chapter_id == nil || $0.chapter_id == task.chapter_id }) {
+      openLesson(lesson)
+    } else {
+      go(.study)
+    }
+  }
+
+  func completeLocalAgentReviewTask(_ task: CloudStudyPlanTask, day: String) async throws {
+    guard cloud == nil, let scope = noteScope, let courseID = selectedCourseID,
+      localAgentReviewTasks(day: day).contains(where: { $0.id == task.id }) else {
+      throw ContentError.invalid("复习任务已变更，请重新打开学习计划。")
+    }
+    let epoch = cloudState.epoch
+    let objects = try await repository.completeLocalAgentReviewTask(task.id, day: day, courseID: courseID, scope: scope)
+    guard noteScope == scope, cloudState.epoch == epoch else { throw CancellationError() }
+    assistantState.learningObjects = objects
+  }
+}
+
+extension LocalBookCourseRepository {
+  func completeLocalAgentReviewTask(_ id: String, day: String, courseID: String, scope: String) throws -> [AgentLearningObject] {
+    try db.transaction {
+      try Task.checkCancellation()
+      try requireLiveCourse(courseID: courseID, scope: scope)
+      var objects = try loadAgentLearningObjects(scope: scope)
+      guard let index = objects.firstIndex(where: {
+        $0.id == id && $0.kind == "review_task" && $0.course_id == courseID && $0.data["date"]?.stringValue == day
+      }) else { throw ContentError.invalid("复习任务已变更，请重新打开学习计划。") }
+      if objects[index].data["status"]?.stringValue != "done" {
+        objects[index].data["status"] = .string("done")
+        objects[index].revision += 1
+        try saveAgentLearningObjects(objects, scope: scope)
+      }
+      return objects
     }
   }
 }

@@ -685,7 +685,7 @@ struct AssistantChatView: View {
       GeometryReader { viewport in
         ScrollView {
           VStack(alignment: .leading, spacing: 14) {
-            Text(store.cloud == nil ? "本地演示学习助手" : "基于当前教材原文回答").font(DS.font(.body)).foregroundStyle(
+            Text(ContentBundle.fixtureMode ? "本地演示学习助手" : "DeepSeek 学习助手").font(DS.font(.body)).foregroundStyle(
               DS.secondary
             ).frame(height: 28, alignment: .top)
             if store.currentSource != nil {
